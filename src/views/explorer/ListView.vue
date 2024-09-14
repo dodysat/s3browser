@@ -4,7 +4,7 @@
       <progress class="progress h-1" v-if="loading"></progress>
       <div class="h-6" v-else></div>
     </div>
-    <div class="bg-base-200 p-5">
+    <div>
       <div class="overflow-x-auto">
         <table class="table table-xs table-zebra">
           <thead>
