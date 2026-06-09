@@ -18,6 +18,22 @@ type ThemeProviderState = {
 
 const COLOR_SCHEME_QUERY = "(prefers-color-scheme: dark)"
 const THEME_VALUES: Theme[] = ["dark", "light", "system"]
+const THEME_META = {
+  dark: {
+    themeColor: "#171717",
+    statusBarStyle: "black-translucent",
+  },
+  light: {
+    themeColor: "#ffffff",
+    statusBarStyle: "default",
+  },
+} satisfies Record<
+  ResolvedTheme,
+  {
+    themeColor: string
+    statusBarStyle: string
+  }
+>
 
 const ThemeProviderContext = React.createContext<
   ThemeProviderState | undefined
@@ -37,6 +53,25 @@ function getSystemTheme(): ResolvedTheme {
   }
 
   return "light"
+}
+
+function setMetaContent(name: string, content: string) {
+  let meta = document.querySelector<HTMLMetaElement>(`meta[name="${name}"]`)
+
+  if (!meta) {
+    meta = document.createElement("meta")
+    meta.name = name
+    document.head.appendChild(meta)
+  }
+
+  meta.content = content
+}
+
+function applyMobileBrowserTheme(resolvedTheme: ResolvedTheme) {
+  const meta = THEME_META[resolvedTheme]
+
+  setMetaContent("theme-color", meta.themeColor)
+  setMetaContent("apple-mobile-web-app-status-bar-style", meta.statusBarStyle)
 }
 
 function disableTransitionsTemporarily() {
@@ -112,6 +147,7 @@ export function ThemeProvider({
 
       root.classList.remove("light", "dark")
       root.classList.add(resolvedTheme)
+      applyMobileBrowserTheme(resolvedTheme)
 
       if (restoreTransitions) {
         restoreTransitions()

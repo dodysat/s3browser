@@ -516,9 +516,17 @@ export function App() {
   }) {
     setIsEntryListLoading(true)
     setPresignedFallback(null)
+    const normalizedPrefix = normalizeRoutePrefix(prefix)
+
+    if (!append && routeMode !== "none") {
+      lastHandledRouteRef.current = createRouteKey({
+        bucket,
+        prefix: normalizedPrefix,
+      })
+      writeBucketRoute(bucket, normalizedPrefix, routeMode)
+    }
 
     try {
-      const normalizedPrefix = normalizeRoutePrefix(prefix)
       const listing = await listObjects({
         profile,
         bucket,
@@ -531,14 +539,6 @@ export function App() {
       )
       setCurrentPrefix(normalizedPrefix)
       setNextContinuationToken(listing.nextContinuationToken)
-
-      if (!append && routeMode !== "none") {
-        lastHandledRouteRef.current = createRouteKey({
-          bucket,
-          prefix: normalizedPrefix,
-        })
-        writeBucketRoute(bucket, normalizedPrefix, routeMode)
-      }
 
       setNotice({
         type: "success",
@@ -756,6 +756,11 @@ export function App() {
 
     setOpeningKey(entry.key)
     setPresignedFallback(null)
+    const openedWindow = window.open("about:blank", "_blank")
+
+    if (openedWindow) {
+      openedWindow.opener = null
+    }
 
     try {
       const url = await createPresignedObjectUrl({
@@ -764,7 +769,6 @@ export function App() {
         key: entry.key,
         expiresInSeconds: 3600,
       })
-      const openedWindow = window.open(url, "_blank", "noopener,noreferrer")
 
       if (!openedWindow) {
         setPresignedFallback({ name: entry.name, url })
@@ -775,11 +779,13 @@ export function App() {
         return
       }
 
+      openedWindow.location.href = url
       setNotice({
         type: "success",
         text: "Presigned URL opened. It expires in 1 hour.",
       })
     } catch (error) {
+      openedWindow?.close()
       setNotice({
         type: "error",
         text: formatS3Error(error),
