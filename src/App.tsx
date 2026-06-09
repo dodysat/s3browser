@@ -1137,7 +1137,7 @@ export function App() {
 
         <section className="grid min-w-0 gap-3">
           <div className="grid gap-3 rounded-[8px] border bg-card p-3 shadow-sm">
-            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
               <div className="relative min-w-0">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <TextInput
@@ -1148,11 +1148,13 @@ export function App() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2 sm:flex">
+              <div className="flex gap-2">
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-10"
+                  size="icon"
+                  className="size-10"
+                  aria-label="Refresh objects"
                   disabled={!activeProfile || !bucketName || isEntryListLoading}
                   onClick={() =>
                     activeProfile &&
@@ -1170,11 +1172,12 @@ export function App() {
                   ) : (
                     <RefreshCw />
                   )}
-                  Refresh
                 </Button>
                 <Button
                   type="button"
-                  className="h-10"
+                  size="icon"
+                  className="size-10"
+                  aria-label="Upload files"
                   disabled={!activeProfile || !bucketName || !!uploadState}
                   onClick={() => uploadInputRef.current?.click()}
                 >
@@ -1183,7 +1186,6 @@ export function App() {
                   ) : (
                     <UploadCloud />
                   )}
-                  Upload
                 </Button>
                 <input
                   ref={uploadInputRef}
