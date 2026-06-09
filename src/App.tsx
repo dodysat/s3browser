@@ -148,7 +148,7 @@ function TextInput({
   return (
     <input
       className={cn(
-        "h-10 min-w-0 rounded-[8px] border border-input bg-background px-3 text-sm outline-none transition focus:border-ring focus:ring-3 focus:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60",
+        "h-10 min-w-0 rounded-[8px] border border-input bg-background px-3 text-base outline-none transition focus:border-ring focus:ring-3 focus:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60 sm:text-sm",
         className
       )}
       {...props}
@@ -164,7 +164,7 @@ function SelectInput({
   return (
     <select
       className={cn(
-        "h-10 min-w-0 rounded-[8px] border border-input bg-background px-3 text-sm outline-none transition focus:border-ring focus:ring-3 focus:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60",
+        "h-10 min-w-0 rounded-[8px] border border-input bg-background px-3 text-base outline-none transition focus:border-ring focus:ring-3 focus:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60 sm:text-sm",
         className
       )}
       {...props}
