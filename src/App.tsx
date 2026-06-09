@@ -20,6 +20,7 @@ import {
   Sun,
   Trash2,
   UploadCloud,
+  X,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -64,8 +65,8 @@ const THEME_OPTIONS: Array<{
   icon: React.ComponentType<{ className?: string }>
 }> = [
   { value: "system", label: "System", icon: Monitor },
-  { value: "light", label: "Light", icon: Sun },
   { value: "dark", label: "Dark", icon: Moon },
+  { value: "light", label: "Light", icon: Sun },
 ]
 
 function profileToDraft(profile: S3Profile): S3ProfileDraft {
@@ -197,31 +198,25 @@ function NoticeBanner({ notice }: { notice: Notice | null }) {
 
 function ThemeSwitcher() {
   const { theme, setTheme } = useTheme()
+  const currentThemeIndex = Math.max(
+    THEME_OPTIONS.findIndex((option) => option.value === theme),
+    0
+  )
+  const currentTheme = THEME_OPTIONS[currentThemeIndex]
+  const nextTheme = THEME_OPTIONS[(currentThemeIndex + 1) % THEME_OPTIONS.length]
+  const CurrentThemeIcon = currentTheme.icon
 
   return (
-    <div className="grid grid-cols-3 rounded-[8px] border bg-background p-0.5">
-      {THEME_OPTIONS.map((option) => {
-        const Icon = option.icon
-
-        return (
-          <button
-            key={option.value}
-            type="button"
-            aria-label={`Use ${option.label.toLowerCase()} theme`}
-            className={cn(
-              "flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-[7px] px-2 text-xs font-medium transition",
-              theme === option.value
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-            )}
-            onClick={() => setTheme(option.value)}
-          >
-            <Icon className="size-3.5" />
-            <span className="hidden sm:inline">{option.label}</span>
-          </button>
-        )
-      })}
-    </div>
+    <Button
+      type="button"
+      variant="outline"
+      size="icon"
+      className="size-10"
+      aria-label={`Theme: ${currentTheme.label}. Switch to ${nextTheme.label.toLowerCase()} theme`}
+      onClick={() => setTheme(nextTheme.value)}
+    >
+      <CurrentThemeIcon />
+    </Button>
   )
 }
 
@@ -548,6 +543,7 @@ export function App() {
     setCurrentPrefix("")
     setNextContinuationToken(null)
     setNotice({ type: "info", text: `${profile.name} selected.` })
+    setIsProfilePanelOpen(false)
   }
 
   function handleDeleteProfile(profileId: string) {
@@ -716,20 +712,20 @@ export function App() {
   return (
     <div className="min-h-svh bg-background text-foreground">
       <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center gap-2 px-3 py-3 sm:px-4">
+        <div className="mx-auto grid max-w-7xl grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3">
           <Button
             type="button"
             variant="outline"
             size="icon"
-            className="lg:hidden"
+            className="size-10 lg:hidden"
             aria-label="Toggle profiles"
             onClick={() => setIsProfilePanelOpen((isOpen) => !isOpen)}
           >
             <PanelLeft />
           </Button>
 
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <div className="grid size-9 shrink-0 place-items-center rounded-[8px] bg-primary text-primary-foreground">
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="grid size-9 shrink-0 place-items-center rounded-[8px] bg-primary text-primary-foreground max-[360px]:hidden">
               <Cloud className="size-5" />
             </div>
             <div className="min-w-0">
@@ -749,12 +745,12 @@ export function App() {
       <main className="mx-auto grid max-w-7xl gap-3 p-3 sm:p-4 lg:grid-cols-[340px_minmax(0,1fr)]">
         <aside
           className={cn(
-            "min-w-0 lg:block",
+            "fixed inset-0 z-30 min-w-0 bg-background/80 p-3 backdrop-blur-sm lg:static lg:z-auto lg:block lg:bg-transparent lg:p-0 lg:backdrop-blur-none",
             isProfilePanelOpen ? "block" : "hidden"
           )}
         >
           <form
-            className="grid gap-3 rounded-[8px] border bg-card p-3 shadow-sm"
+            className="mx-auto grid max-h-[calc(100svh-1.5rem)] max-w-md gap-3 overflow-y-auto rounded-[8px] border bg-card p-3 shadow-xl lg:max-h-none lg:max-w-none lg:overflow-visible lg:shadow-sm"
             onSubmit={handleConnect}
           >
             <div className="flex items-center justify-between gap-2">
@@ -772,6 +768,16 @@ export function App() {
               >
                 <Plus />
                 New
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-9 lg:hidden"
+                aria-label="Close profiles"
+                onClick={() => setIsProfilePanelOpen(false)}
+              >
+                <X />
               </Button>
             </div>
 
@@ -905,12 +911,17 @@ export function App() {
               </label>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <Button type="button" variant="outline" onClick={handleSaveProfile}>
+            <div className="sticky bottom-0 grid grid-cols-2 gap-2 bg-card pt-1 lg:static lg:bg-transparent lg:pt-0">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10"
+                onClick={handleSaveProfile}
+              >
                 <Save />
                 Save
               </Button>
-              <Button type="submit">
+              <Button type="submit" className="h-10">
                 <KeyRound />
                 Connect
               </Button>
@@ -930,7 +941,10 @@ export function App() {
                   />
                 </Field>
 
-                <Field label="Loaded buckets">
+                <Field
+                  label="Loaded buckets"
+                  className={cn(buckets.length === 0 && "hidden sm:grid")}
+                >
                   <SelectInput
                     value={buckets.some((bucket) => bucket.name === bucketName) ? bucketName : ""}
                     disabled={buckets.length === 0}
@@ -952,6 +966,7 @@ export function App() {
                 <Button
                   type="button"
                   variant="outline"
+                  className="h-10"
                   disabled={!activeProfile || isBucketListLoading}
                   onClick={() => refreshBuckets()}
                 >
@@ -964,6 +979,7 @@ export function App() {
                 </Button>
                 <Button
                   type="button"
+                  className="h-10"
                   disabled={!activeProfile || isEntryListLoading}
                   onClick={() => openBucket()}
                 >
@@ -1023,6 +1039,7 @@ export function App() {
                 <Button
                   type="button"
                   variant="outline"
+                  className="h-10"
                   disabled={!activeProfile || !bucketName || isEntryListLoading}
                   onClick={() =>
                     activeProfile &&
@@ -1044,6 +1061,7 @@ export function App() {
                 </Button>
                 <Button
                   type="button"
+                  className="h-10"
                   disabled={!activeProfile || !bucketName || !!uploadState}
                   onClick={() => uploadInputRef.current?.click()}
                 >
@@ -1130,11 +1148,11 @@ export function App() {
                     return (
                       <div
                         key={`${entry.type}:${entry.key}`}
-                        className="grid gap-2 p-3 sm:grid-cols-[minmax(0,1fr)_120px_180px_48px] sm:items-center"
+                        className="grid grid-cols-[minmax(0,1fr)_44px] gap-x-2 gap-y-1 p-3 sm:grid-cols-[minmax(0,1fr)_120px_180px_48px] sm:items-center"
                       >
                         <button
                           type="button"
-                          className="flex min-w-0 items-center gap-3 text-left"
+                          className="col-start-1 flex min-w-0 items-center gap-3 text-left"
                           onClick={() => handleEntryOpen(entry)}
                         >
                           <span
@@ -1161,12 +1179,12 @@ export function App() {
                           </span>
                         </button>
 
-                        <div className="pl-12 text-xs text-muted-foreground sm:pl-0 sm:text-sm">
+                        <div className="col-start-1 pl-12 text-xs text-muted-foreground sm:col-auto sm:pl-0 sm:text-sm">
                           {entry.type === "object"
                             ? formatBytes(entry.size)
                             : "Folder"}
                         </div>
-                        <div className="pl-12 text-xs text-muted-foreground sm:pl-0 sm:text-sm">
+                        <div className="col-start-1 pl-12 text-xs text-muted-foreground sm:col-auto sm:pl-0 sm:text-sm">
                           {entry.type === "object"
                             ? formatDate(entry.lastModified)
                             : "--"}
@@ -1175,6 +1193,7 @@ export function App() {
                           type="button"
                           variant="ghost"
                           size="icon"
+                          className="col-start-2 row-span-3 row-start-1 size-10 self-center justify-self-end sm:col-auto sm:row-auto sm:size-8"
                           aria-label={
                             entry.type === "folder"
                               ? `Open ${entry.name}`
