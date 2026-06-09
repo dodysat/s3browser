@@ -451,7 +451,7 @@ export function App() {
     setEditingProfileId(savedProfile.id)
     setActiveProfileId(savedProfile.id)
     setBucketName(savedProfile.bucket)
-    setNotice({ type: "success", text: "Profile saved." })
+    setNotice(null)
 
     return savedProfile
   }
@@ -481,13 +481,7 @@ export function App() {
     try {
       const nextBuckets = await listBuckets(profile)
       setBuckets(nextBuckets)
-      setNotice({
-        type: "success",
-        text:
-          nextBuckets.length > 0
-            ? "Buckets loaded."
-            : "Bucket list returned no buckets.",
-      })
+      setNotice(null)
     } catch (error) {
       setBuckets([])
       setNotice({
@@ -539,11 +533,7 @@ export function App() {
       )
       setCurrentPrefix(normalizedPrefix)
       setNextContinuationToken(listing.nextContinuationToken)
-
-      setNotice({
-        type: "success",
-        text: append ? "More objects loaded." : "Objects loaded.",
-      })
+      setNotice(null)
     } catch (error) {
       if (!append) {
         setEntries([])
@@ -601,7 +591,7 @@ export function App() {
         setEntries([])
         setCurrentPrefix("")
         setNextContinuationToken(null)
-        setNotice({ type: "info", text: "No bucket open." })
+        setNotice(null)
         return
       }
 
@@ -688,7 +678,7 @@ export function App() {
     setEntries([])
     setCurrentPrefix("")
     setNextContinuationToken(null)
-    setNotice({ type: "info", text: "New profile ready." })
+    setNotice(null)
   }
 
   function handleSelectProfile(profile: S3Profile) {
@@ -700,7 +690,7 @@ export function App() {
     setEntries([])
     setCurrentPrefix("")
     setNextContinuationToken(null)
-    setNotice({ type: "info", text: `${profile.name} selected.` })
+    setNotice(null)
     setIsProfilePanelOpen(false)
   }
 
@@ -734,7 +724,7 @@ export function App() {
     setEntries([])
     setCurrentPrefix("")
     setNextContinuationToken(null)
-    setNotice({ type: "success", text: "Profile deleted." })
+    setNotice(null)
   }
 
   async function handleEntryOpen(entry: BrowserEntry) {
@@ -772,18 +762,12 @@ export function App() {
 
       if (!openedWindow) {
         setPresignedFallback({ name: entry.name, url })
-        setNotice({
-          type: "info",
-          text: "Presigned URL is ready.",
-        })
+        setNotice(null)
         return
       }
 
       openedWindow.location.href = url
-      setNotice({
-        type: "success",
-        text: "Presigned URL opened. It expires in 1 hour.",
-      })
+      setNotice(null)
     } catch (error) {
       openedWindow?.close()
       setNotice({
@@ -809,8 +793,6 @@ export function App() {
     }
 
     try {
-      let uploadedFiles = 0
-
       for (const [index, file] of files.entries()) {
         const key = normalizeUploadKey(currentPrefix, file.name)
         const alreadyExists = entries.some(
@@ -848,16 +830,9 @@ export function App() {
           },
         })
 
-        uploadedFiles += 1
       }
 
-      setNotice({
-        type: "success",
-        text:
-          uploadedFiles === 1
-            ? "1 file uploaded."
-            : `${uploadedFiles} files uploaded.`,
-      })
+      setNotice(null)
       await loadEntries({
         profile: activeProfile,
         bucket: bucketName,
@@ -987,6 +962,72 @@ export function App() {
               )}
             </div>
 
+            <div className="grid gap-3 border-t pt-3">
+              <h3 className="text-sm font-semibold">Bucket</h3>
+
+              <Field label="Bucket">
+                <TextInput
+                  value={bucketName}
+                  placeholder="bucket-name"
+                  onChange={(event) => setBucketName(event.target.value)}
+                />
+              </Field>
+
+              <Field
+                label="Loaded buckets"
+                className={cn(buckets.length === 0 && "hidden")}
+              >
+                <SelectInput
+                  value={
+                    buckets.some((bucket) => bucket.name === bucketName)
+                      ? bucketName
+                      : ""
+                  }
+                  disabled={buckets.length === 0}
+                  onChange={(event) => setBucketName(event.target.value)}
+                >
+                  <option value="">
+                    {buckets.length === 0 ? "No buckets loaded" : "Select bucket"}
+                  </option>
+                  {buckets.map((bucket) => (
+                    <option key={bucket.name} value={bucket.name}>
+                      {bucket.name}
+                    </option>
+                  ))}
+                </SelectInput>
+              </Field>
+
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10"
+                  disabled={!activeProfile || isBucketListLoading}
+                  onClick={() => refreshBuckets()}
+                >
+                  {isBucketListLoading ? (
+                    <LoaderCircle className="animate-spin" />
+                  ) : (
+                    <Database />
+                  )}
+                  Buckets
+                </Button>
+                <Button
+                  type="button"
+                  className="h-10"
+                  disabled={!activeProfile || isEntryListLoading}
+                  onClick={() => openBucket()}
+                >
+                  {isEntryListLoading ? (
+                    <LoaderCircle className="animate-spin" />
+                  ) : (
+                    <FolderOpen />
+                  )}
+                  Open
+                </Button>
+              </div>
+            </div>
+
             <div className="grid gap-3">
               <Field label="Profile name">
                 <TextInput
@@ -1096,100 +1137,6 @@ export function App() {
 
         <section className="grid min-w-0 gap-3">
           <div className="grid gap-3 rounded-[8px] border bg-card p-3 shadow-sm">
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                <Field label="Bucket">
-                  <TextInput
-                    value={bucketName}
-                    placeholder="bucket-name"
-                    onChange={(event) => setBucketName(event.target.value)}
-                  />
-                </Field>
-
-                <Field
-                  label="Loaded buckets"
-                  className={cn(buckets.length === 0 && "hidden sm:grid")}
-                >
-                  <SelectInput
-                    value={buckets.some((bucket) => bucket.name === bucketName) ? bucketName : ""}
-                    disabled={buckets.length === 0}
-                    onChange={(event) => setBucketName(event.target.value)}
-                  >
-                    <option value="">
-                      {buckets.length === 0 ? "No buckets loaded" : "Select bucket"}
-                    </option>
-                    {buckets.map((bucket) => (
-                      <option key={bucket.name} value={bucket.name}>
-                        {bucket.name}
-                      </option>
-                    ))}
-                  </SelectInput>
-                </Field>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 sm:flex">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10"
-                  disabled={!activeProfile || isBucketListLoading}
-                  onClick={() => refreshBuckets()}
-                >
-                  {isBucketListLoading ? (
-                    <LoaderCircle className="animate-spin" />
-                  ) : (
-                    <Database />
-                  )}
-                  Buckets
-                </Button>
-                <Button
-                  type="button"
-                  className="h-10"
-                  disabled={!activeProfile || isEntryListLoading}
-                  onClick={() => openBucket()}
-                >
-                  {isEntryListLoading ? (
-                    <LoaderCircle className="animate-spin" />
-                  ) : (
-                    <FolderOpen />
-                  )}
-                  Open
-                </Button>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-1.5">
-              {breadcrumbs.map((crumb, index) => (
-                <React.Fragment key={crumb.prefix || "root"}>
-                  {index > 0 ? (
-                    <ChevronRight className="size-3.5 text-muted-foreground" />
-                  ) : null}
-                  <Button
-                    type="button"
-                    variant={index === breadcrumbs.length - 1 ? "secondary" : "ghost"}
-                    size="sm"
-                    disabled={!activeProfile || !bucketName || isEntryListLoading}
-                    onClick={() =>
-                      activeProfile &&
-                      bucketName &&
-                      loadEntries({
-                        profile: activeProfile,
-                        bucket: bucketName,
-                        prefix: crumb.prefix,
-                        append: false,
-                        routeMode: "push",
-                      })
-                    }
-                  >
-                    {index === 0 ? <ArrowLeft /> : null}
-                    {crumb.label}
-                  </Button>
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid gap-3 rounded-[8px] border bg-card p-3 shadow-sm">
             <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
               <div className="relative min-w-0">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -1246,6 +1193,36 @@ export function App() {
                   onChange={handleUploadFiles}
                 />
               </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {breadcrumbs.map((crumb, index) => (
+                <React.Fragment key={crumb.prefix || "root"}>
+                  {index > 0 ? (
+                    <ChevronRight className="size-3.5 text-muted-foreground" />
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant={index === breadcrumbs.length - 1 ? "secondary" : "ghost"}
+                    size="sm"
+                    disabled={!activeProfile || !bucketName || isEntryListLoading}
+                    onClick={() =>
+                      activeProfile &&
+                      bucketName &&
+                      loadEntries({
+                        profile: activeProfile,
+                        bucket: bucketName,
+                        prefix: crumb.prefix,
+                        append: false,
+                        routeMode: "push",
+                      })
+                    }
+                  >
+                    {index === 0 ? <ArrowLeft /> : null}
+                    {crumb.label}
+                  </Button>
+                </React.Fragment>
+              ))}
             </div>
 
             <NoticeBanner notice={notice} />
