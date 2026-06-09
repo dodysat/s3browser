@@ -59,6 +59,11 @@ type UploadState = {
   totalFiles: number
 }
 
+type BucketRoute = {
+  bucket: string
+  prefix: string
+}
+
 const THEME_OPTIONS: Array<{
   value: Theme
   label: string
@@ -122,6 +127,72 @@ function buildBreadcrumbs(prefix: string) {
 
 function normalizeUploadKey(prefix: string, fileName: string) {
   return `${prefix}${fileName}`.replace(/^\/+/, "")
+}
+
+function normalizeRoutePrefix(prefix: string) {
+  const normalizedPrefix = prefix
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .join("/")
+
+  return normalizedPrefix ? `${normalizedPrefix}/` : ""
+}
+
+function safelyDecodeRouteSegment(segment: string) {
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment
+  }
+}
+
+function createRouteKey(route: BucketRoute) {
+  return `${route.bucket}\n${route.prefix}`
+}
+
+function createBucketRoutePath(bucket: string, prefix: string) {
+  const encodedBucket = encodeURIComponent(bucket)
+  const encodedPrefix = normalizeRoutePrefix(prefix)
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/")
+
+  return `/b/${encodedBucket}${encodedPrefix ? `/${encodedPrefix}` : ""}`
+}
+
+function parseBucketRoute(pathname = window.location.pathname) {
+  const segments = pathname.split("/").filter(Boolean)
+
+  if (segments[0] !== "b" || !segments[1]) {
+    return null
+  }
+
+  return {
+    bucket: safelyDecodeRouteSegment(segments[1]),
+    prefix: normalizeRoutePrefix(
+      segments.slice(2).map(safelyDecodeRouteSegment).join("/")
+    ),
+  } satisfies BucketRoute
+}
+
+function writeBucketRoute(
+  bucket: string,
+  prefix: string,
+  mode: "push" | "replace"
+) {
+  const nextPath = createBucketRoutePath(bucket, prefix)
+
+  if (window.location.pathname === nextPath) {
+    return
+  }
+
+  window.history[mode === "push" ? "pushState" : "replaceState"](
+    { bucket, prefix },
+    "",
+    nextPath
+  )
 }
 
 function Field({
@@ -242,6 +313,7 @@ function EmptyState({
 
 export function App() {
   const uploadInputRef = React.useRef<HTMLInputElement | null>(null)
+  const lastHandledRouteRef = React.useRef<string | null>(null)
   const [profiles, setProfilesState] = React.useState<S3Profile[]>(() =>
     loadProfiles()
   )
@@ -427,35 +499,47 @@ export function App() {
     }
   }
 
-  async function loadEntries({
+  const loadEntries = React.useCallback(async function loadEntries({
     profile,
     bucket,
     prefix,
     continuationToken,
     append,
+    routeMode = "none",
   }: {
     profile: S3Profile
     bucket: string
     prefix: string
     continuationToken?: string | null
     append: boolean
+    routeMode?: "push" | "replace" | "none"
   }) {
     setIsEntryListLoading(true)
     setPresignedFallback(null)
 
     try {
+      const normalizedPrefix = normalizeRoutePrefix(prefix)
       const listing = await listObjects({
         profile,
         bucket,
-        prefix,
+        prefix: normalizedPrefix,
         continuationToken,
       })
 
       setEntries((currentEntries) =>
         append ? [...currentEntries, ...listing.entries] : listing.entries
       )
-      setCurrentPrefix(prefix)
+      setCurrentPrefix(normalizedPrefix)
       setNextContinuationToken(listing.nextContinuationToken)
+
+      if (!append && routeMode !== "none") {
+        lastHandledRouteRef.current = createRouteKey({
+          bucket,
+          prefix: normalizedPrefix,
+        })
+        writeBucketRoute(bucket, normalizedPrefix, routeMode)
+      }
+
       setNotice({
         type: "success",
         text: append ? "More objects loaded." : "Objects loaded.",
@@ -473,7 +557,80 @@ export function App() {
     } finally {
       setIsEntryListLoading(false)
     }
-  }
+  }, [])
+
+  React.useEffect(() => {
+    const route = parseBucketRoute()
+
+    if (!route) {
+      return
+    }
+
+    const routeKey = createRouteKey(route)
+
+    if (activeProfile && lastHandledRouteRef.current === routeKey) {
+      return
+    }
+
+    queueMicrotask(() => {
+      if (!activeProfile) {
+        setBucketName(route.bucket)
+        setCurrentPrefix(route.prefix)
+        setNotice({ type: "error", text: "Save a profile first." })
+        return
+      }
+
+      lastHandledRouteRef.current = routeKey
+      setBucketName(route.bucket)
+      setSearchQuery("")
+      void loadEntries({
+        profile: activeProfile,
+        bucket: route.bucket,
+        prefix: route.prefix,
+        append: false,
+      })
+    })
+  }, [activeProfile, loadEntries])
+
+  React.useEffect(() => {
+    const handlePopState = () => {
+      const route = parseBucketRoute()
+
+      if (!route) {
+        lastHandledRouteRef.current = null
+        setEntries([])
+        setCurrentPrefix("")
+        setNextContinuationToken(null)
+        setNotice({ type: "info", text: "No bucket open." })
+        return
+      }
+
+      lastHandledRouteRef.current = createRouteKey(route)
+      setBucketName(route.bucket)
+      setSearchQuery("")
+
+      if (!activeProfile) {
+        setEntries([])
+        setCurrentPrefix(route.prefix)
+        setNextContinuationToken(null)
+        setNotice({ type: "error", text: "Save a profile first." })
+        return
+      }
+
+      void loadEntries({
+        profile: activeProfile,
+        bucket: route.bucket,
+        prefix: route.prefix,
+        append: false,
+      })
+    }
+
+    window.addEventListener("popstate", handlePopState)
+
+    return () => {
+      window.removeEventListener("popstate", handlePopState)
+    }
+  }, [activeProfile, loadEntries])
 
   async function openBucket(
     nextBucketName = bucketName,
@@ -498,6 +655,7 @@ export function App() {
       bucket: trimmedBucketName,
       prefix: "",
       append: false,
+      routeMode: "push",
     })
   }
 
@@ -591,6 +749,7 @@ export function App() {
         bucket: bucketName,
         prefix: entry.key,
         append: false,
+        routeMode: "push",
       })
       return
     }
@@ -1012,6 +1171,7 @@ export function App() {
                         bucket: bucketName,
                         prefix: crumb.prefix,
                         append: false,
+                        routeMode: "push",
                       })
                     }
                   >
