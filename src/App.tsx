@@ -1179,12 +1179,22 @@ export function App() {
                           </span>
                         </button>
 
-                        <div className="col-start-1 pl-12 text-xs text-muted-foreground sm:col-auto sm:pl-0 sm:text-sm">
+                        <div
+                          className={cn(
+                            "col-start-1 pl-12 text-xs text-muted-foreground sm:col-auto sm:pl-0 sm:text-sm",
+                            entry.type === "folder" && "hidden sm:block"
+                          )}
+                        >
                           {entry.type === "object"
                             ? formatBytes(entry.size)
                             : "Folder"}
                         </div>
-                        <div className="col-start-1 pl-12 text-xs text-muted-foreground sm:col-auto sm:pl-0 sm:text-sm">
+                        <div
+                          className={cn(
+                            "col-start-1 pl-12 text-xs text-muted-foreground sm:col-auto sm:pl-0 sm:text-sm",
+                            entry.type === "folder" && "hidden sm:block"
+                          )}
+                        >
                           {entry.type === "object"
                             ? formatDate(entry.lastModified)
                             : "--"}
