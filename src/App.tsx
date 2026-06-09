@@ -207,6 +207,7 @@ function ThemeSwitcher() {
           <button
             key={option.value}
             type="button"
+            aria-label={`Use ${option.label.toLowerCase()} theme`}
             className={cn(
               "flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-[7px] px-2 text-xs font-medium transition",
               theme === option.value
