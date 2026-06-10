@@ -1,6 +1,14 @@
 import * as React from "react"
 
 import { AppHeader } from "@/components/app-header"
+import {
+  ConfirmActionDialog,
+  FolderNameDialog,
+  MessageDialog,
+  type ConfirmDialogState,
+  type FolderNameDialogState,
+  type MessageDialogState,
+} from "@/components/app-dialogs"
 import { ConnectionPanel } from "@/components/connection-panel"
 import { ObjectBrowser } from "@/components/object-browser"
 import type { Notice, UploadState } from "@/lib/app-types"
@@ -50,6 +58,13 @@ type LoadEntriesOptions = {
 export function App() {
   const uploadInputRef = React.useRef<HTMLInputElement | null>(null)
   const lastHandledRouteRef = React.useRef<string | null>(null)
+  const confirmDialogResolverRef = React.useRef<
+    ((confirmed: boolean) => void) | null
+  >(null)
+  const messageDialogResolverRef = React.useRef<(() => void) | null>(null)
+  const folderNameDialogResolverRef = React.useRef<
+    ((folderName: string | null) => void) | null
+  >(null)
   const [profiles, setProfilesState] = React.useState<S3Profile[]>(() =>
     loadProfiles()
   )
@@ -93,6 +108,12 @@ export function App() {
     name: string
     url: string
   } | null>(null)
+  const [confirmDialog, setConfirmDialog] =
+    React.useState<ConfirmDialogState | null>(null)
+  const [messageDialog, setMessageDialog] =
+    React.useState<MessageDialogState | null>(null)
+  const [folderNameDialog, setFolderNameDialog] =
+    React.useState<FolderNameDialogState | null>(null)
 
   const activeProfile = React.useMemo(() => {
     return (
@@ -123,6 +144,100 @@ export function App() {
     uploadState && uploadState.total
       ? Math.round((uploadState.loaded / uploadState.total) * 100)
       : null
+
+  function requestConfirm(dialog: ConfirmDialogState) {
+    return new Promise<boolean>((resolve) => {
+      confirmDialogResolverRef.current = resolve
+      setConfirmDialog(dialog)
+    })
+  }
+
+  function settleConfirmDialog(confirmed: boolean) {
+    const resolve = confirmDialogResolverRef.current
+
+    confirmDialogResolverRef.current = null
+    setConfirmDialog(null)
+    resolve?.(confirmed)
+  }
+
+  function showMessageDialog(dialog: MessageDialogState) {
+    return new Promise<void>((resolve) => {
+      messageDialogResolverRef.current = resolve
+      setMessageDialog(dialog)
+    })
+  }
+
+  function closeMessageDialog() {
+    const resolve = messageDialogResolverRef.current
+
+    messageDialogResolverRef.current = null
+    setMessageDialog(null)
+    resolve?.()
+  }
+
+  function requestFolderName() {
+    return new Promise<string | null>((resolve) => {
+      folderNameDialogResolverRef.current = resolve
+      setFolderNameDialog({ value: "", error: null })
+    })
+  }
+
+  function settleFolderNameDialog(folderName: string | null) {
+    const resolve = folderNameDialogResolverRef.current
+
+    folderNameDialogResolverRef.current = null
+    setFolderNameDialog(null)
+    resolve?.(folderName)
+  }
+
+  function handleFolderNameDialogValueChange(value: string) {
+    setFolderNameDialog((currentDialog) =>
+      currentDialog ? { ...currentDialog, value, error: null } : currentDialog
+    )
+  }
+
+  function handleFolderNameDialogSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!folderNameDialog) {
+      return
+    }
+
+    const folderName = folderNameDialog.value.trim().replace(/^\/+|\/+$/g, "")
+
+    if (!folderName) {
+      setFolderNameDialog({ ...folderNameDialog, error: "Folder name is required." })
+      return
+    }
+
+    if (folderName.includes("/")) {
+      setFolderNameDialog({
+        ...folderNameDialog,
+        error: "Folder name cannot contain slash characters.",
+      })
+      return
+    }
+
+    if (folderName === "." || folderName === "..") {
+      setFolderNameDialog({
+        ...folderNameDialog,
+        error: "Folder name is not allowed.",
+      })
+      return
+    }
+
+    const folderKey = `${currentPrefix}${folderName}/`.replace(/^\/+/, "")
+
+    if (entries.some((entry) => entry.key === folderKey)) {
+      setFolderNameDialog({
+        ...folderNameDialog,
+        error: `Folder "${folderName}" already exists.`,
+      })
+      return
+    }
+
+    settleFolderNameDialog(folderName)
+  }
 
   function commitProfiles(nextProfiles: S3Profile[]) {
     setProfilesState(nextProfiles)
@@ -471,14 +586,21 @@ export function App() {
     setIsConnectionEditorOpen(true)
   }
 
-  function handleDeleteProfile(profileId: string) {
+  async function handleDeleteProfile(profileId: string) {
     const profile = profiles.find((nextProfile) => nextProfile.id === profileId)
 
     if (!profile) {
       return
     }
 
-    if (!window.confirm(`Delete profile "${profile.name}"?`)) {
+    const confirmed = await requestConfirm({
+      title: "Delete Connection",
+      description: `Delete saved connection "${profile.name}"? This removes the local profile only.`,
+      confirmLabel: "Delete",
+      destructive: true,
+    })
+
+    if (!confirmed) {
       return
     }
 
@@ -563,35 +685,13 @@ export function App() {
       return
     }
 
-    const folderNameInput = window.prompt("Folder name")
-
-    if (folderNameInput === null) {
-      return
-    }
-
-    const folderName = folderNameInput.trim().replace(/^\/+|\/+$/g, "")
+    const folderName = await requestFolderName()
 
     if (!folderName) {
-      window.alert("Folder name is required.")
-      return
-    }
-
-    if (folderName.includes("/")) {
-      window.alert("Folder name cannot contain slash characters.")
-      return
-    }
-
-    if (folderName === "." || folderName === "..") {
-      window.alert("Folder name is not allowed.")
       return
     }
 
     const folderKey = `${currentPrefix}${folderName}/`.replace(/^\/+/, "")
-
-    if (entries.some((entry) => entry.key === folderKey)) {
-      window.alert(`Folder "${folderName}" already exists.`)
-      return
-    }
 
     setIsFolderCreating(true)
     setPresignedFallback(null)
@@ -613,8 +713,11 @@ export function App() {
     } catch (error) {
       const message = formatS3Error(error)
 
-      window.alert(message)
       setNotice({ type: "error", text: message })
+      await showMessageDialog({
+        title: "Create Folder Failed",
+        description: message,
+      })
     } finally {
       setIsFolderCreating(false)
     }
@@ -627,12 +730,17 @@ export function App() {
     }
 
     const entryLabel = entry.type === "folder" ? "folder" : "file"
+    const confirmed = await requestConfirm({
+      title: entry.type === "folder" ? "Delete Folder" : "Delete File",
+      description:
+        entry.type === "folder"
+          ? `Delete empty folder "${entry.name}"? Folders with contents cannot be deleted.`
+          : `Delete file "${entry.name}"? This cannot be undone.`,
+      confirmLabel: "Delete",
+      destructive: true,
+    })
 
-    if (
-      !window.confirm(
-        `Delete ${entryLabel} "${entry.name}"? This cannot be undone.`
-      )
-    ) {
+    if (!confirmed) {
       return
     }
 
@@ -664,9 +772,16 @@ export function App() {
       })
     } catch (error) {
       const message = formatS3Error(error)
+      const title =
+        entry.type === "folder" && message.toLowerCase().includes("not empty")
+          ? "Folder Not Empty"
+          : `Delete ${entryLabel.charAt(0).toUpperCase()}${entryLabel.slice(1)} Failed`
 
-      window.alert(message)
       setNotice({ type: "error", text: message })
+      await showMessageDialog({
+        title,
+        description: message,
+      })
     } finally {
       setDeletingKey(null)
     }
@@ -692,11 +807,16 @@ export function App() {
           (entry) => entry.type === "object" && entry.key === key
         )
 
-        if (
-          alreadyExists &&
-          !window.confirm(`Overwrite "${file.name}" in this prefix?`)
-        ) {
-          continue
+        if (alreadyExists) {
+          const confirmed = await requestConfirm({
+            title: "Overwrite File",
+            description: `Replace "${file.name}" in the current prefix?`,
+            confirmLabel: "Overwrite",
+          })
+
+          if (!confirmed) {
+            continue
+          }
         }
 
         const uploadStartedAt = Date.now()
@@ -739,9 +859,12 @@ export function App() {
         cacheMode: "reload",
       })
     } catch (error) {
-      setNotice({
-        type: "error",
-        text: formatS3Error(error),
+      const message = formatS3Error(error)
+
+      setNotice({ type: "error", text: message })
+      await showMessageDialog({
+        title: "Upload Failed",
+        description: message,
       })
     } finally {
       setUploadState(null)
@@ -857,6 +980,19 @@ export function App() {
           onLoadMore={loadMoreEntries}
         />
       </main>
+
+      <FolderNameDialog
+        dialog={folderNameDialog}
+        onValueChange={handleFolderNameDialogValueChange}
+        onCancel={() => settleFolderNameDialog(null)}
+        onSubmit={handleFolderNameDialogSubmit}
+      />
+      <ConfirmActionDialog
+        dialog={confirmDialog}
+        onCancel={() => settleConfirmDialog(false)}
+        onConfirm={() => settleConfirmDialog(true)}
+      />
+      <MessageDialog dialog={messageDialog} onClose={closeMessageDialog} />
     </div>
   )
 }
