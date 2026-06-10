@@ -27,6 +27,8 @@ import {
 } from "@/lib/profile-storage"
 import {
   createPresignedObjectUrl,
+  createFolder,
+  deleteEmptyFolder,
   deleteObject,
   formatS3Error,
   listObjects,
@@ -83,6 +85,7 @@ export function App() {
     () => profiles.length === 0
   )
   const [isEntryListLoading, setIsEntryListLoading] = React.useState(false)
+  const [isFolderCreating, setIsFolderCreating] = React.useState(false)
   const [openingKey, setOpeningKey] = React.useState<string | null>(null)
   const [deletingKey, setDeletingKey] = React.useState<string | null>(null)
   const [uploadState, setUploadState] = React.useState<UploadState | null>(null)
@@ -554,28 +557,50 @@ export function App() {
     }
   }
 
-  async function handleEntryDelete(entry: BrowserEntry) {
-    if (entry.type !== "object") {
-      return
-    }
-
+  async function handleCreateFolder() {
     if (!activeProfile || !bucketName) {
       setNotice({ type: "error", text: "Open a bucket first." })
       return
     }
 
-    if (!window.confirm(`Delete "${entry.name}"? This cannot be undone.`)) {
+    const folderNameInput = window.prompt("Folder name")
+
+    if (folderNameInput === null) {
       return
     }
 
-    setDeletingKey(entry.key)
+    const folderName = folderNameInput.trim().replace(/^\/+|\/+$/g, "")
+
+    if (!folderName) {
+      window.alert("Folder name is required.")
+      return
+    }
+
+    if (folderName.includes("/")) {
+      window.alert("Folder name cannot contain slash characters.")
+      return
+    }
+
+    if (folderName === "." || folderName === "..") {
+      window.alert("Folder name is not allowed.")
+      return
+    }
+
+    const folderKey = `${currentPrefix}${folderName}/`.replace(/^\/+/, "")
+
+    if (entries.some((entry) => entry.key === folderKey)) {
+      window.alert(`Folder "${folderName}" already exists.`)
+      return
+    }
+
+    setIsFolderCreating(true)
     setPresignedFallback(null)
 
     try {
-      await deleteObject({
+      await createFolder({
         profile: activeProfile,
         bucket: bucketName,
-        key: entry.key,
+        key: folderKey,
       })
       setNotice(null)
       await loadEntries({
@@ -586,10 +611,62 @@ export function App() {
         cacheMode: "reload",
       })
     } catch (error) {
-      setNotice({
-        type: "error",
-        text: formatS3Error(error),
+      const message = formatS3Error(error)
+
+      window.alert(message)
+      setNotice({ type: "error", text: message })
+    } finally {
+      setIsFolderCreating(false)
+    }
+  }
+
+  async function handleEntryDelete(entry: BrowserEntry) {
+    if (!activeProfile || !bucketName) {
+      setNotice({ type: "error", text: "Open a bucket first." })
+      return
+    }
+
+    const entryLabel = entry.type === "folder" ? "folder" : "file"
+
+    if (
+      !window.confirm(
+        `Delete ${entryLabel} "${entry.name}"? This cannot be undone.`
+      )
+    ) {
+      return
+    }
+
+    setDeletingKey(entry.key)
+    setPresignedFallback(null)
+
+    try {
+      if (entry.type === "folder") {
+        await deleteEmptyFolder({
+          profile: activeProfile,
+          bucket: bucketName,
+          key: entry.key,
+        })
+      } else {
+        await deleteObject({
+          profile: activeProfile,
+          bucket: bucketName,
+          key: entry.key,
+        })
+      }
+
+      setNotice(null)
+      await loadEntries({
+        profile: activeProfile,
+        bucket: bucketName,
+        prefix: currentPrefix,
+        append: false,
+        cacheMode: "reload",
       })
+    } catch (error) {
+      const message = formatS3Error(error)
+
+      window.alert(message)
+      setNotice({ type: "error", text: message })
     } finally {
       setDeletingKey(null)
     }
@@ -752,11 +829,15 @@ export function App() {
           uploadPercent={uploadPercent}
           openingKey={openingKey}
           deletingKey={deletingKey}
+          isFolderCreating={isFolderCreating}
           nextContinuationToken={nextContinuationToken}
           isEntryListLoading={isEntryListLoading}
           uploadInputRef={uploadInputRef}
           onSearchChange={setSearchQuery}
           onRefresh={refreshCurrentPrefix}
+          onCreateFolder={() => {
+            void handleCreateFolder()
+          }}
           onUploadFiles={(event) => {
             void handleUploadFiles(event)
           }}

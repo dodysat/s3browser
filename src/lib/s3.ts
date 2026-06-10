@@ -2,6 +2,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   ListObjectsV2Command,
+  PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3"
 import { Upload } from "@aws-sdk/lib-storage"
@@ -368,42 +369,49 @@ export async function listObjects({
     })
   )
 
-  const folders: FolderEntry[] = (response.CommonPrefixes ?? []).flatMap(
-    (commonPrefix) => {
-      if (!commonPrefix.Prefix) {
-        return []
-      }
+  const folders = new Map<string, FolderEntry>()
 
-      return [
-        {
-          type: "folder",
-          key: commonPrefix.Prefix,
-          name: getEntryName(commonPrefix.Prefix, normalizedPrefix),
-        },
-      ]
+  for (const commonPrefix of response.CommonPrefixes ?? []) {
+    if (!commonPrefix.Prefix) {
+      continue
     }
-  )
 
-  const objects: ObjectEntry[] = (response.Contents ?? []).flatMap((object) => {
+    folders.set(commonPrefix.Prefix, {
+      type: "folder",
+      key: commonPrefix.Prefix,
+      name: getEntryName(commonPrefix.Prefix, normalizedPrefix),
+    })
+  }
+
+  const objects: ObjectEntry[] = []
+
+  for (const object of response.Contents ?? []) {
     if (!object.Key || object.Key === normalizedPrefix) {
-      return []
+      continue
     }
 
-    return [
-      {
-        type: "object",
+    if (object.Key.endsWith("/") && (object.Size ?? 0) === 0) {
+      folders.set(object.Key, {
+        type: "folder",
         key: object.Key,
         name: getEntryName(object.Key, normalizedPrefix),
-        size: object.Size ?? 0,
-        lastModified: object.LastModified ?? null,
-        storageClass: object.StorageClass ?? "",
-      },
-    ]
-  })
+      })
+      continue
+    }
+
+    objects.push({
+      type: "object",
+      key: object.Key,
+      name: getEntryName(object.Key, normalizedPrefix),
+      size: object.Size ?? 0,
+      lastModified: object.LastModified ?? null,
+      storageClass: object.StorageClass ?? "",
+    })
+  }
 
   const now = Date.now()
   const listing = {
-    entries: sortEntries([...folders, ...objects]),
+    entries: sortEntries([...folders.values(), ...objects]),
     nextContinuationToken: response.NextContinuationToken ?? null,
     cacheInfo: {
       cachedAt: now,
@@ -454,6 +462,28 @@ export async function uploadObject({
   await upload.done()
 }
 
+export async function createFolder({
+  profile,
+  bucket,
+  key,
+}: {
+  profile: S3Profile
+  bucket: string
+  key: string
+}) {
+  const client = createClient(profile)
+  const folderKey = key.endsWith("/") ? key : `${key}/`
+
+  await client.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: folderKey,
+      Body: "",
+      ContentType: "application/x-directory",
+    })
+  )
+}
+
 export async function deleteObject({
   profile,
   bucket,
@@ -469,6 +499,40 @@ export async function deleteObject({
     new DeleteObjectCommand({
       Bucket: bucket,
       Key: key,
+    })
+  )
+}
+
+export async function deleteEmptyFolder({
+  profile,
+  bucket,
+  key,
+}: {
+  profile: S3Profile
+  bucket: string
+  key: string
+}) {
+  const client = createClient(profile)
+  const folderKey = key.endsWith("/") ? key : `${key}/`
+  const response = await client.send(
+    new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: folderKey,
+      MaxKeys: 2,
+    })
+  )
+  const containsChild = (response.Contents ?? []).some(
+    (object) => object.Key && object.Key !== folderKey
+  )
+
+  if (containsChild || response.IsTruncated) {
+    throw new Error("Folder is not empty. Delete its contents first.")
+  }
+
+  await client.send(
+    new DeleteObjectCommand({
+      Bucket: bucket,
+      Key: folderKey,
     })
   )
 }

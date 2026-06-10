@@ -6,6 +6,7 @@ import {
   ExternalLink,
   File,
   Folder,
+  FolderPlus,
   FolderOpen,
   LoaderCircle,
   Plus,
@@ -38,11 +39,13 @@ type ObjectBrowserProps = {
   uploadPercent: number | null
   openingKey: string | null
   deletingKey: string | null
+  isFolderCreating: boolean
   nextContinuationToken: string | null
   isEntryListLoading: boolean
   uploadInputRef: React.RefObject<HTMLInputElement | null>
   onSearchChange: (query: string) => void
   onRefresh: () => void
+  onCreateFolder: () => void
   onUploadFiles: React.ChangeEventHandler<HTMLInputElement>
   onEntryOpen: (entry: BrowserEntry) => void
   onEntryDelete: (entry: BrowserEntry) => void
@@ -64,11 +67,13 @@ export function ObjectBrowser({
   uploadPercent,
   openingKey,
   deletingKey,
+  isFolderCreating,
   nextContinuationToken,
   isEntryListLoading,
   uploadInputRef,
   onSearchChange,
   onRefresh,
+  onCreateFolder,
   onUploadFiles,
   onEntryOpen,
   onEntryDelete,
@@ -83,10 +88,12 @@ export function ObjectBrowser({
           bucketName={bucketName}
           searchQuery={searchQuery}
           isEntryListLoading={isEntryListLoading}
+          isFolderCreating={isFolderCreating}
           uploadState={uploadState}
           uploadInputRef={uploadInputRef}
           onSearchChange={onSearchChange}
           onRefresh={onRefresh}
+          onCreateFolder={onCreateFolder}
           onUploadFiles={onUploadFiles}
         />
 
@@ -140,20 +147,24 @@ function ObjectToolbar({
   bucketName,
   searchQuery,
   isEntryListLoading,
+  isFolderCreating,
   uploadState,
   uploadInputRef,
   onSearchChange,
   onRefresh,
+  onCreateFolder,
   onUploadFiles,
 }: {
   hasActiveProfile: boolean
   bucketName: string
   searchQuery: string
   isEntryListLoading: boolean
+  isFolderCreating: boolean
   uploadState: UploadState | null
   uploadInputRef: React.RefObject<HTMLInputElement | null>
   onSearchChange: (query: string) => void
   onRefresh: () => void
+  onCreateFolder: () => void
   onUploadFiles: React.ChangeEventHandler<HTMLInputElement>
 }) {
   return (
@@ -182,6 +193,21 @@ function ObjectToolbar({
             <LoaderCircle className="animate-spin" />
           ) : (
             <RefreshCw />
+          )}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="size-10"
+          aria-label="Create folder"
+          disabled={!hasActiveProfile || !bucketName || isFolderCreating}
+          onClick={onCreateFolder}
+        >
+          {isFolderCreating ? (
+            <LoaderCircle className="animate-spin" />
+          ) : (
+            <FolderPlus />
           )}
         </Button>
         <Button
@@ -498,23 +524,25 @@ function ObjectRow({
             <ExternalLink />
           )}
         </Button>
-        {entry.type === "object" ? (
-          <Button
-            type="button"
-            variant="destructive"
-            size="icon"
-            className="size-10 sm:size-8"
-            aria-label={`Delete ${entry.name}`}
-            disabled={isOpening || isDeleting}
-            onClick={() => onDelete(entry)}
-          >
-            {isDeleting ? (
-              <LoaderCircle className="animate-spin" />
-            ) : (
-              <Trash2 />
-            )}
-          </Button>
-        ) : null}
+        <Button
+          type="button"
+          variant="destructive"
+          size="icon"
+          className="size-10 sm:size-8"
+          aria-label={
+            entry.type === "folder"
+              ? `Delete folder ${entry.name}`
+              : `Delete file ${entry.name}`
+          }
+          disabled={isOpening || isDeleting}
+          onClick={() => onDelete(entry)}
+        >
+          {isDeleting ? (
+            <LoaderCircle className="animate-spin" />
+          ) : (
+            <Trash2 />
+          )}
+        </Button>
       </div>
     </div>
   )
