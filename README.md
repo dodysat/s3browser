@@ -10,6 +10,21 @@ A mobile-first, browser-only S3-compatible file browser inspired by Cyberduck.
 - Object open actions create presigned `GetObject` URLs that expire after 1 hour.
 - Uploads use client-signed single `PUT` URLs with browser-native progress events.
 
+## Shared Connection URLs
+
+The app can bootstrap a saved connection from a `/share` URL:
+
+```text
+https://s3browser.example.com/share?bucket=my-bucket&access=ACCESS_KEY&secret=SECRET_KEY&endpoint=https%3A%2F%2Fs3.example.com
+```
+
+Supported query parameters:
+
+- `bucket`, `access`, `secret`, and `endpoint` are required.
+- `region`, `sessionToken`, `prefix`, `name`, and `pathStyle` are optional.
+
+After importing the connection, the app saves the profile to `localStorage`, opens the bucket, and replaces the address with `/b/<bucket>` so credentials are not left visible. Treat shared URLs as sensitive because they can still be stored in browser history, logs, analytics, or chat messages before the app loads.
+
 ## Local Development
 
 ```bash

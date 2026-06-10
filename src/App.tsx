@@ -16,6 +16,7 @@ import {
   createRouteKey,
   normalizeRoutePrefix,
   parseBucketRoute,
+  parseShareRoute,
   writeBucketRoute,
 } from "@/lib/bucket-route"
 import {
@@ -408,6 +409,95 @@ export function App() {
       setIsEntryListLoading(false)
     }
   }, [])
+
+  React.useEffect(() => {
+    const shareRoute = parseShareRoute()
+
+    if (!shareRoute) {
+      return
+    }
+
+    queueMicrotask(() => {
+      try {
+        new URL(shareRoute.endpoint)
+      } catch {
+        window.history.replaceState(null, "", "/")
+        setNotice({
+          type: "error",
+          text: "Shared endpoint must be a valid URL.",
+        })
+        setMessageDialog({
+          title: "Invalid Share Link",
+          description: "Shared endpoint must be a valid URL.",
+        })
+        return
+      }
+
+      const existingProfile = profiles.find(
+        (profile) =>
+          profile.endpoint === shareRoute.endpoint &&
+          profile.accessKeyId === shareRoute.accessKeyId &&
+          profile.bucket === shareRoute.bucket
+      )
+      const sharedProfile = existingProfile
+        ? {
+            ...existingProfile,
+            name: shareRoute.name,
+            endpoint: shareRoute.endpoint,
+            region: shareRoute.region,
+            accessKeyId: shareRoute.accessKeyId,
+            secretAccessKey: shareRoute.secretAccessKey,
+            sessionToken: shareRoute.sessionToken,
+            bucket: shareRoute.bucket,
+            forcePathStyle: shareRoute.forcePathStyle,
+          }
+        : createProfile({
+            name: shareRoute.name,
+            endpoint: shareRoute.endpoint,
+            region: shareRoute.region,
+            accessKeyId: shareRoute.accessKeyId,
+            secretAccessKey: shareRoute.secretAccessKey,
+            sessionToken: shareRoute.sessionToken,
+            bucket: shareRoute.bucket,
+            forcePathStyle: shareRoute.forcePathStyle,
+          })
+      const nextProfiles = existingProfile
+        ? profiles.map((profile) =>
+            profile.id === existingProfile.id ? sharedProfile : profile
+          )
+        : [...profiles, sharedProfile]
+      const routeKey = createRouteKey({
+        bucket: shareRoute.bucket,
+        prefix: shareRoute.prefix,
+      })
+
+      setProfilesState(nextProfiles)
+      saveProfiles(nextProfiles)
+      setActiveProfileIdState(sharedProfile.id)
+      saveActiveProfileId(sharedProfile.id)
+      setEditingProfileId(sharedProfile.id)
+      setProfileForm(profileToDraft(sharedProfile))
+      setBucketName(sharedProfile.bucket)
+      setSearchQuery("")
+      setEntries([])
+      setCurrentPrefix("")
+      setNextContinuationToken(null)
+      setObjectListingCacheInfo(null)
+      setNotice(null)
+      setIsConnectionEditorOpen(false)
+      setIsProfilePanelOpen(false)
+
+      lastHandledRouteRef.current = routeKey
+      void loadEntries({
+        profile: sharedProfile,
+        bucket: shareRoute.bucket,
+        prefix: shareRoute.prefix,
+        append: false,
+        routeMode: "replace",
+        cacheMode: "reload",
+      })
+    })
+  }, [loadEntries, profiles])
 
   React.useEffect(() => {
     const route = parseBucketRoute()
