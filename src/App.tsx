@@ -882,7 +882,7 @@ export function App() {
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-7xl gap-3 p-3 sm:p-4 lg:grid-cols-[340px_minmax(0,1fr)]">
+      <main className="mx-auto grid max-w-7xl gap-3 p-3 sm:p-4 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start">
         <aside
           className={cn(
             "fixed inset-0 z-30 min-w-0 bg-background/80 p-3 backdrop-blur-sm lg:static lg:z-auto lg:block lg:bg-transparent lg:p-0 lg:backdrop-blur-none",
@@ -1136,12 +1136,12 @@ export function App() {
         </aside>
 
         <section className="grid min-w-0 gap-3">
-          <div className="grid gap-3 rounded-[8px] border bg-card p-3 shadow-sm">
-            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+          <div className="grid content-start gap-3 rounded-[8px] border bg-card p-3 shadow-sm">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[minmax(220px,360px)_auto] sm:justify-start">
               <div className="relative min-w-0">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <TextInput
-                  className="pl-9"
+                  className="w-full pl-9"
                   value={searchQuery}
                   placeholder="Filter current prefix"
                   onChange={(event) => setSearchQuery(event.target.value)}
