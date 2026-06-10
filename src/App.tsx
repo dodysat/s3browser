@@ -699,10 +699,14 @@ export function App() {
           continue
         }
 
+        const uploadStartedAt = Date.now()
+
         setUploadState({
           fileName: file.name,
           loaded: 0,
           total: file.size,
+          startedAt: uploadStartedAt,
+          updatedAt: uploadStartedAt,
           index: index + 1,
           totalFiles: files.length,
         })
@@ -717,6 +721,8 @@ export function App() {
               fileName: file.name,
               loaded: progress.loaded,
               total: progress.total,
+              startedAt: uploadStartedAt,
+              updatedAt: Date.now(),
               index: index + 1,
               totalFiles: files.length,
             })

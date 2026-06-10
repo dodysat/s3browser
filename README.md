@@ -8,6 +8,7 @@ A mobile-first, browser-only S3-compatible file browser inspired by Cyberduck.
 - Credentials are saved in plaintext `localStorage`.
 - There is no backend, S3 proxy, Pages Function, or server-side signing.
 - Object open actions create presigned `GetObject` URLs that expire after 1 hour.
+- Uploads use client-signed single `PUT` URLs with browser-native progress events.
 
 ## Local Development
 
@@ -60,3 +61,5 @@ Because requests are made from the browser, every S3-compatible endpoint must al
 ```
 
 Limit `AllowedOrigins` to the exact Cloudflare Pages or Workers domain you deploy.
+
+Uploads intentionally avoid browser multipart upload. That means the app does not depend on multipart `UploadPart` responses exposing `ETag`, and the progress bar is driven by the browser `XMLHttpRequest.upload` progress event. Single `PUT` uploads are limited to 5 GB.

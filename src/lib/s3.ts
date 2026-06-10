@@ -5,7 +5,6 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3"
-import { Upload } from "@aws-sdk/lib-storage"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
 import type { S3Profile } from "@/lib/profile-storage"
@@ -65,6 +64,7 @@ export type UploadProgress = {
 
 const OBJECT_LISTING_CACHE_STORAGE_KEY = "s3browser:object-listings:v1"
 const OBJECT_LISTING_CACHE_TTL_MS = 60 * 60 * 1000
+const MAX_SINGLE_PUT_SIZE_BYTES = 5 * 1024 * 1024 * 1024
 
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "")
@@ -439,27 +439,92 @@ export async function uploadObject({
   onProgress?: (progress: UploadProgress) => void
 }) {
   const client = createClient(profile)
-  const upload = new Upload({
+
+  if (file.size > MAX_SINGLE_PUT_SIZE_BYTES) {
+    throw new Error("Single PUT uploads are limited to 5 GB.")
+  }
+
+  const contentType = file.type || undefined
+  const url = await getSignedUrl(
     client,
-    params: {
+    new PutObjectCommand({
       Bucket: bucket,
       Key: key,
-      Body: file,
-      ContentType: file.type || undefined,
-    },
-    queueSize: 3,
-    partSize: 8 * 1024 * 1024,
-    leavePartsOnError: false,
-  })
+      ContentType: contentType,
+    }),
+    { expiresIn: 3600 }
+  )
 
-  upload.on("httpUploadProgress", (progress) => {
+  await uploadWithProgress({
+    url,
+    file,
+    contentType,
+    onProgress,
+  })
+}
+
+function uploadWithProgress({
+  url,
+  file,
+  contentType,
+  onProgress,
+}: {
+  url: string
+  file: File
+  contentType?: string
+  onProgress?: (progress: UploadProgress) => void
+}) {
+  return new Promise<void>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+
+    xhr.open("PUT", url)
+
+    if (contentType) {
+      xhr.setRequestHeader("Content-Type", contentType)
+    }
+
+    xhr.upload.onprogress = (event) => {
+      onProgress?.({
+        loaded: event.loaded,
+        total: event.lengthComputable ? event.total : file.size || null,
+      })
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress?.({
+          loaded: file.size,
+          total: file.size,
+        })
+        resolve()
+        return
+      }
+
+      reject(
+        new Error(
+          xhr.responseText.trim() || `Upload failed with HTTP ${xhr.status}.`
+        )
+      )
+    }
+
+    xhr.onerror = () => {
+      reject(
+        new Error(
+          "Upload failed. Check that bucket CORS allows PUT from this origin."
+        )
+      )
+    }
+
+    xhr.onabort = () => {
+      reject(new Error("Upload was aborted."))
+    }
+
     onProgress?.({
-      loaded: progress.loaded ?? 0,
-      total: progress.total ?? null,
+      loaded: 0,
+      total: file.size || null,
     })
+    xhr.send(file)
   })
-
-  await upload.done()
 }
 
 export async function createFolder({

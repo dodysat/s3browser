@@ -301,9 +301,43 @@ function UploadProgress({
   uploadState: UploadState | null
   uploadPercent: number | null
 }) {
+  const [now, setNow] = React.useState(() => Date.now())
+  const uploadStartedAt = uploadState?.startedAt ?? null
+
+  React.useEffect(() => {
+    if (!uploadStartedAt) {
+      return
+    }
+
+    const intervalId = window.setInterval(() => {
+      setNow(Date.now())
+    }, 1000)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [uploadStartedAt])
+
   if (!uploadState) {
     return null
   }
+
+  const percent = clampPercent(
+    uploadPercent ??
+      (uploadState.total
+        ? Math.round((uploadState.loaded / uploadState.total) * 100)
+        : null)
+  )
+  const elapsedSeconds = Math.max((now - uploadState.startedAt) / 1000, 0)
+  const uploadSpeed =
+    elapsedSeconds > 0 ? uploadState.loaded / elapsedSeconds : 0
+  const remainingBytes = uploadState.total
+    ? Math.max(uploadState.total - uploadState.loaded, 0)
+    : null
+  const remainingSeconds =
+    remainingBytes !== null && uploadSpeed > 0
+      ? Math.ceil(remainingBytes / uploadSpeed)
+      : null
 
   return (
     <div className="grid gap-2 rounded-[8px] border p-3">
@@ -313,16 +347,67 @@ function UploadProgress({
           {uploadState.index}/{uploadState.totalFiles}
         </div>
       </div>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        <span>{percent !== null ? `${percent}%` : "Preparing"}</span>
+        <span>{formatBytes(uploadState.loaded)} uploaded</span>
+        {uploadState.total ? (
+          <span>of {formatBytes(uploadState.total)}</span>
+        ) : null}
+        <span>{formatUploadSpeed(uploadSpeed)}</span>
+        <span>{formatUploadEta(remainingSeconds)}</span>
+      </div>
       <div className="h-2 overflow-hidden rounded-full bg-muted">
         <div
           className="h-full bg-emerald-500 transition-all"
           style={{
-            width: `${uploadPercent ?? 15}%`,
+            width: `${percent ?? 15}%`,
           }}
         />
       </div>
     </div>
   )
+}
+
+function formatUploadSpeed(bytesPerSecond: number) {
+  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond < 1) {
+    return "0 B/s"
+  }
+
+  return `${formatBytes(bytesPerSecond)}/s`
+}
+
+function clampPercent(percent: number | null) {
+  if (percent === null) {
+    return null
+  }
+
+  return Math.min(100, Math.max(0, percent))
+}
+
+function formatUploadEta(seconds: number | null) {
+  if (seconds === null) {
+    return "Estimating"
+  }
+
+  if (seconds <= 0) {
+    return "Done"
+  }
+
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = seconds % 60
+
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60)
+    const remainingMinutes = minutes % 60
+
+    return `${hours}h ${remainingMinutes}m left`
+  }
+
+  if (minutes > 0) {
+    return `${minutes}m ${remainingSeconds}s left`
+  }
+
+  return `${remainingSeconds}s left`
 }
 
 function ObjectList({
