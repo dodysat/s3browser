@@ -27,12 +27,11 @@ import {
 } from "@/lib/profile-storage"
 import {
   createPresignedObjectUrl,
+  deleteObject,
   formatS3Error,
-  listBuckets,
   listObjects,
   uploadObject,
   type BrowserEntry,
-  type BucketSummary,
   type ObjectListingCacheInfo,
 } from "@/lib/s3"
 
@@ -68,7 +67,6 @@ export function App() {
   const [bucketName, setBucketName] = React.useState(
     () => initialProfile?.bucket ?? ""
   )
-  const [buckets, setBuckets] = React.useState<BucketSummary[]>([])
   const [currentPrefix, setCurrentPrefix] = React.useState("")
   const [entries, setEntries] = React.useState<BrowserEntry[]>([])
   const [objectListingCacheInfo, setObjectListingCacheInfo] =
@@ -81,9 +79,12 @@ export function App() {
   const [isProfilePanelOpen, setIsProfilePanelOpen] = React.useState(
     () => profiles.length === 0
   )
-  const [isBucketListLoading, setIsBucketListLoading] = React.useState(false)
+  const [isConnectionEditorOpen, setIsConnectionEditorOpen] = React.useState(
+    () => profiles.length === 0
+  )
   const [isEntryListLoading, setIsEntryListLoading] = React.useState(false)
   const [openingKey, setOpeningKey] = React.useState<string | null>(null)
+  const [deletingKey, setDeletingKey] = React.useState<string | null>(null)
   const [uploadState, setUploadState] = React.useState<UploadState | null>(null)
   const [presignedFallback, setPresignedFallback] = React.useState<{
     name: string
@@ -137,6 +138,27 @@ export function App() {
     }))
   }
 
+  function resetConnectionEditor() {
+    const profile =
+      (editingProfileId
+        ? profiles.find((nextProfile) => nextProfile.id === editingProfileId)
+        : null) ??
+      activeProfile ??
+      profiles.at(0) ??
+      null
+
+    setEditingProfileId(profile?.id ?? null)
+    setProfileForm(profile ? profileToDraft(profile) : createEmptyProfileDraft())
+  }
+
+  function handleConnectionEditorOpenChange(open: boolean) {
+    setIsConnectionEditorOpen(open)
+
+    if (!open) {
+      resetConnectionEditor()
+    }
+  }
+
   function validateDraft() {
     const endpoint = profileForm.endpoint.trim()
 
@@ -156,6 +178,10 @@ export function App() {
 
     if (!profileForm.secretAccessKey) {
       return "Secret access key is required."
+    }
+
+    if (!profileForm.bucket.trim()) {
+      return "Bucket is required."
     }
 
     return null
@@ -194,40 +220,22 @@ export function App() {
   }
 
   function rememberBucket(profileId: string, nextBucketName: string) {
-    const nextProfiles = profiles.map((profile) =>
-      profile.id === profileId ? { ...profile, bucket: nextBucketName } : profile
-    )
+    setProfilesState((currentProfiles) => {
+      const nextProfiles = currentProfiles.map((profile) =>
+        profile.id === profileId
+          ? { ...profile, bucket: nextBucketName }
+          : profile
+      )
 
-    commitProfiles(nextProfiles)
+      saveProfiles(nextProfiles)
+
+      return nextProfiles
+    })
     setProfileForm((currentDraft) =>
       editingProfileId === profileId
         ? { ...currentDraft, bucket: nextBucketName }
         : currentDraft
     )
-  }
-
-  async function refreshBuckets(profile = activeProfile) {
-    if (!profile) {
-      setNotice({ type: "error", text: "Save a profile first." })
-      return
-    }
-
-    setIsBucketListLoading(true)
-    setPresignedFallback(null)
-
-    try {
-      const nextBuckets = await listBuckets(profile)
-      setBuckets(nextBuckets)
-      setNotice(null)
-    } catch (error) {
-      setBuckets([])
-      setNotice({
-        type: "error",
-        text: `Bucket list failed. Direct bucket entry is still available. ${formatS3Error(error)}`,
-      })
-    } finally {
-      setIsBucketListLoading(false)
-    }
   }
 
   const loadEntries = React.useCallback(async function loadEntries({
@@ -394,42 +402,70 @@ export function App() {
       return
     }
 
+    setIsConnectionEditorOpen(false)
     setIsProfilePanelOpen(false)
-    await refreshBuckets(savedProfile)
-
-    if (savedProfile.bucket) {
-      await openBucket(savedProfile.bucket, savedProfile)
-    }
-  }
-
-  function handleSaveProfile() {
-    persistDraft()
+    await openBucket(savedProfile.bucket, savedProfile)
   }
 
   function handleNewProfile() {
     setEditingProfileId(null)
     setProfileForm(createEmptyProfileDraft())
-    setBucketName("")
-    setBuckets([])
-    setEntries([])
-    setCurrentPrefix("")
-    setNextContinuationToken(null)
-    setObjectListingCacheInfo(null)
     setNotice(null)
+    setIsConnectionEditorOpen(true)
   }
 
-  function handleSelectProfile(profile: S3Profile) {
+  async function handleConnectProfile(profile: S3Profile) {
     setEditingProfileId(profile.id)
     setProfileForm(profileToDraft(profile))
     setActiveProfileId(profile.id)
     setBucketName(profile.bucket)
-    setBuckets([])
     setEntries([])
     setCurrentPrefix("")
     setNextContinuationToken(null)
     setObjectListingCacheInfo(null)
     setNotice(null)
+    setIsConnectionEditorOpen(false)
     setIsProfilePanelOpen(false)
+    await openBucket(profile.bucket, profile)
+  }
+
+  function handleEditProfile(profile: S3Profile) {
+    setEditingProfileId(profile.id)
+    setProfileForm(profileToDraft(profile))
+    setNotice(null)
+    setIsConnectionEditorOpen(true)
+  }
+
+  function createDuplicateProfileName(profileName: string) {
+    const baseName = `${profileName} copy`
+
+    if (!profiles.some((profile) => profile.name === baseName)) {
+      return baseName
+    }
+
+    let copyIndex = 2
+    let nextName = `${baseName} ${copyIndex}`
+
+    while (profiles.some((profile) => profile.name === nextName)) {
+      copyIndex += 1
+      nextName = `${baseName} ${copyIndex}`
+    }
+
+    return nextName
+  }
+
+  function handleDuplicateProfile(profile: S3Profile) {
+    const duplicatedProfile = createProfile({
+      ...profileToDraft(profile),
+      name: createDuplicateProfileName(profile.name),
+    })
+    const nextProfiles = [...profiles, duplicatedProfile]
+
+    commitProfiles(nextProfiles)
+    setEditingProfileId(duplicatedProfile.id)
+    setProfileForm(profileToDraft(duplicatedProfile))
+    setNotice(null)
+    setIsConnectionEditorOpen(true)
   }
 
   function handleDeleteProfile(profileId: string) {
@@ -458,12 +494,12 @@ export function App() {
         : createEmptyProfileDraft()
     )
     setBucketName(nextActiveProfile?.bucket ?? "")
-    setBuckets([])
     setEntries([])
     setCurrentPrefix("")
     setNextContinuationToken(null)
     setObjectListingCacheInfo(null)
     setNotice(null)
+    setIsConnectionEditorOpen(false)
   }
 
   async function handleEntryOpen(entry: BrowserEntry) {
@@ -515,6 +551,47 @@ export function App() {
       })
     } finally {
       setOpeningKey(null)
+    }
+  }
+
+  async function handleEntryDelete(entry: BrowserEntry) {
+    if (entry.type !== "object") {
+      return
+    }
+
+    if (!activeProfile || !bucketName) {
+      setNotice({ type: "error", text: "Open a bucket first." })
+      return
+    }
+
+    if (!window.confirm(`Delete "${entry.name}"? This cannot be undone.`)) {
+      return
+    }
+
+    setDeletingKey(entry.key)
+    setPresignedFallback(null)
+
+    try {
+      await deleteObject({
+        profile: activeProfile,
+        bucket: bucketName,
+        key: entry.key,
+      })
+      setNotice(null)
+      await loadEntries({
+        profile: activeProfile,
+        bucket: bucketName,
+        prefix: currentPrefix,
+        append: false,
+        cacheMode: "reload",
+      })
+    } catch (error) {
+      setNotice({
+        type: "error",
+        text: formatS3Error(error),
+      })
+    } finally {
+      setDeletingKey(null)
     }
   }
 
@@ -641,29 +718,24 @@ export function App() {
       <main className="mx-auto grid max-w-7xl gap-3 p-3 sm:p-4 lg:grid-cols-[340px_minmax(0,1fr)] lg:items-start">
         <ConnectionPanel
           isOpen={isProfilePanelOpen}
+          isEditorOpen={isConnectionEditorOpen}
           profiles={profiles}
           activeProfile={activeProfile}
           profileForm={profileForm}
-          bucketName={bucketName}
-          buckets={buckets}
-          isBucketListLoading={isBucketListLoading}
-          isEntryListLoading={isEntryListLoading}
+          isConnectLoading={isEntryListLoading}
           onSubmit={(event) => {
             void handleConnect(event)
           }}
           onClose={() => setIsProfilePanelOpen(false)}
+          onEditorOpenChange={handleConnectionEditorOpenChange}
           onNewProfile={handleNewProfile}
-          onSelectProfile={handleSelectProfile}
+          onConnectProfile={(profile) => {
+            void handleConnectProfile(profile)
+          }}
+          onEditProfile={handleEditProfile}
+          onDuplicateProfile={handleDuplicateProfile}
           onDeleteProfile={handleDeleteProfile}
-          onBucketNameChange={setBucketName}
-          onRefreshBuckets={() => {
-            void refreshBuckets()
-          }}
-          onOpenBucket={() => {
-            void openBucket()
-          }}
           onProfileFormChange={patchProfileForm}
-          onSaveProfile={handleSaveProfile}
         />
 
         <ObjectBrowser
@@ -679,6 +751,7 @@ export function App() {
           uploadState={uploadState}
           uploadPercent={uploadPercent}
           openingKey={openingKey}
+          deletingKey={deletingKey}
           nextContinuationToken={nextContinuationToken}
           isEntryListLoading={isEntryListLoading}
           uploadInputRef={uploadInputRef}
@@ -689,6 +762,9 @@ export function App() {
           }}
           onEntryOpen={(entry) => {
             void handleEntryOpen(entry)
+          }}
+          onEntryDelete={(entry) => {
+            void handleEntryDelete(entry)
           }}
           onBreadcrumbOpen={openBreadcrumbPrefix}
           onLoadMore={loadMoreEntries}

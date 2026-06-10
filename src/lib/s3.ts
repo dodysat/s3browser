@@ -1,6 +1,6 @@
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
-  ListBucketsCommand,
   ListObjectsV2Command,
   S3Client,
 } from "@aws-sdk/client-s3"
@@ -8,11 +8,6 @@ import { Upload } from "@aws-sdk/lib-storage"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
 import type { S3Profile } from "@/lib/profile-storage"
-
-export type BucketSummary = {
-  name: string
-  createdAt: Date | null
-}
 
 export type FolderEntry = {
   type: "folder"
@@ -328,31 +323,6 @@ function deleteObjectListingCacheForPrefix({
   }
 }
 
-export async function listBuckets(profile: S3Profile): Promise<BucketSummary[]> {
-  const client = createClient(profile)
-  const response = await client.send(new ListBucketsCommand({}))
-
-  return (response.Buckets ?? [])
-    .flatMap((bucket) => {
-      if (!bucket.Name) {
-        return []
-      }
-
-      return [
-        {
-          name: bucket.Name,
-          createdAt: bucket.CreationDate ?? null,
-        },
-      ]
-    })
-    .sort((leftBucket, rightBucket) =>
-      leftBucket.name.localeCompare(rightBucket.name, undefined, {
-        numeric: true,
-        sensitivity: "base",
-      })
-    )
-}
-
 export async function listObjects({
   profile,
   bucket,
@@ -482,6 +452,25 @@ export async function uploadObject({
   })
 
   await upload.done()
+}
+
+export async function deleteObject({
+  profile,
+  bucket,
+  key,
+}: {
+  profile: S3Profile
+  bucket: string
+  key: string
+}) {
+  const client = createClient(profile)
+
+  await client.send(
+    new DeleteObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    })
+  )
 }
 
 export async function createPresignedObjectUrl({

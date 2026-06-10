@@ -11,6 +11,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Trash2,
   UploadCloud,
 } from "lucide-react"
 
@@ -36,6 +37,7 @@ type ObjectBrowserProps = {
   uploadState: UploadState | null
   uploadPercent: number | null
   openingKey: string | null
+  deletingKey: string | null
   nextContinuationToken: string | null
   isEntryListLoading: boolean
   uploadInputRef: React.RefObject<HTMLInputElement | null>
@@ -43,6 +45,7 @@ type ObjectBrowserProps = {
   onRefresh: () => void
   onUploadFiles: React.ChangeEventHandler<HTMLInputElement>
   onEntryOpen: (entry: BrowserEntry) => void
+  onEntryDelete: (entry: BrowserEntry) => void
   onBreadcrumbOpen: (prefix: string) => void
   onLoadMore: () => void
 }
@@ -60,6 +63,7 @@ export function ObjectBrowser({
   uploadState,
   uploadPercent,
   openingKey,
+  deletingKey,
   nextContinuationToken,
   isEntryListLoading,
   uploadInputRef,
@@ -67,6 +71,7 @@ export function ObjectBrowser({
   onRefresh,
   onUploadFiles,
   onEntryOpen,
+  onEntryDelete,
   onBreadcrumbOpen,
   onLoadMore,
 }: ObjectBrowserProps) {
@@ -102,8 +107,10 @@ export function ObjectBrowser({
           entries={entries}
           filteredEntries={filteredEntries}
           openingKey={openingKey}
+          deletingKey={deletingKey}
           isEntryListLoading={isEntryListLoading}
           onEntryOpen={onEntryOpen}
+          onEntryDelete={onEntryDelete}
         />
 
         {nextContinuationToken ? (
@@ -297,15 +304,19 @@ function ObjectList({
   entries,
   filteredEntries,
   openingKey,
+  deletingKey,
   isEntryListLoading,
   onEntryOpen,
+  onEntryDelete,
 }: {
   bucketName: string
   entries: BrowserEntry[]
   filteredEntries: BrowserEntry[]
   openingKey: string | null
+  deletingKey: string | null
   isEntryListLoading: boolean
   onEntryOpen: (entry: BrowserEntry) => void
+  onEntryDelete: (entry: BrowserEntry) => void
 }) {
   if (!bucketName) {
     return (
@@ -333,7 +344,7 @@ function ObjectList({
 
   return (
     <div className="overflow-hidden rounded-[8px] border">
-      <div className="hidden grid-cols-[minmax(0,1fr)_120px_180px_48px] gap-3 border-b bg-muted px-3 py-2 text-xs font-medium text-muted-foreground sm:grid">
+      <div className="hidden grid-cols-[minmax(0,1fr)_120px_180px_88px] gap-3 border-b bg-muted px-3 py-2 text-xs font-medium text-muted-foreground sm:grid">
         <div>Name</div>
         <div>Size</div>
         <div>Modified</div>
@@ -345,7 +356,9 @@ function ObjectList({
             key={`${entry.type}:${entry.key}`}
             entry={entry}
             isOpening={openingKey === entry.key}
+            isDeleting={deletingKey === entry.key}
             onOpen={onEntryOpen}
+            onDelete={onEntryDelete}
           />
         ))}
       </div>
@@ -406,14 +419,18 @@ function formatElapsedTime(valueMs: number) {
 function ObjectRow({
   entry,
   isOpening,
+  isDeleting,
   onOpen,
+  onDelete,
 }: {
   entry: BrowserEntry
   isOpening: boolean
+  isDeleting: boolean
   onOpen: (entry: BrowserEntry) => void
+  onDelete: (entry: BrowserEntry) => void
 }) {
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_44px] gap-x-2 gap-y-1 p-3 sm:grid-cols-[minmax(0,1fr)_120px_180px_48px] sm:items-center">
+    <div className="grid grid-cols-[minmax(0,1fr)_40px_40px] gap-x-2 gap-y-1 p-3 sm:grid-cols-[minmax(0,1fr)_120px_180px_88px] sm:items-center">
       <button
         type="button"
         className="col-start-1 flex min-w-0 items-center gap-3 text-left"
@@ -459,27 +476,46 @@ function ObjectRow({
       >
         {entry.type === "object" ? formatDate(entry.lastModified) : "--"}
       </div>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="col-start-2 row-span-3 row-start-1 size-10 self-center justify-self-end sm:col-auto sm:row-auto sm:size-8"
-        aria-label={
-          entry.type === "folder"
-            ? `Open ${entry.name}`
-            : `Open presigned URL for ${entry.name}`
-        }
-        disabled={isOpening}
-        onClick={() => onOpen(entry)}
-      >
-        {isOpening ? (
-          <LoaderCircle className="animate-spin" />
-        ) : entry.type === "folder" ? (
-          <ChevronRight />
-        ) : (
-          <ExternalLink />
-        )}
-      </Button>
+      <div className="col-span-2 col-start-2 row-span-3 row-start-1 flex items-center justify-end gap-1 self-center sm:col-auto sm:col-span-1 sm:row-auto">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-10 sm:size-8"
+          aria-label={
+            entry.type === "folder"
+              ? `Open ${entry.name}`
+              : `Open presigned URL for ${entry.name}`
+          }
+          disabled={isOpening || isDeleting}
+          onClick={() => onOpen(entry)}
+        >
+          {isOpening ? (
+            <LoaderCircle className="animate-spin" />
+          ) : entry.type === "folder" ? (
+            <ChevronRight />
+          ) : (
+            <ExternalLink />
+          )}
+        </Button>
+        {entry.type === "object" ? (
+          <Button
+            type="button"
+            variant="destructive"
+            size="icon"
+            className="size-10 sm:size-8"
+            aria-label={`Delete ${entry.name}`}
+            disabled={isOpening || isDeleting}
+            onClick={() => onDelete(entry)}
+          >
+            {isDeleting ? (
+              <LoaderCircle className="animate-spin" />
+            ) : (
+              <Trash2 />
+            )}
+          </Button>
+        ) : null}
+      </div>
     </div>
   )
 }
