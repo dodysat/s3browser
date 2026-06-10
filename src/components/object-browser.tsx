@@ -20,7 +20,7 @@ import { NoticeBanner } from "@/components/notice-banner"
 import { Button } from "@/components/ui/button"
 import type { Breadcrumb, Notice, UploadState } from "@/lib/app-types"
 import { formatBytes, formatDate } from "@/lib/file-browser"
-import type { BrowserEntry } from "@/lib/s3"
+import type { BrowserEntry, ObjectListingCacheInfo } from "@/lib/s3"
 import { cn } from "@/lib/utils"
 
 type ObjectBrowserProps = {
@@ -31,6 +31,7 @@ type ObjectBrowserProps = {
   breadcrumbs: Breadcrumb[]
   searchQuery: string
   notice: Notice | null
+  objectListingCacheInfo: ObjectListingCacheInfo | null
   presignedFallback: { name: string; url: string } | null
   uploadState: UploadState | null
   uploadPercent: number | null
@@ -54,6 +55,7 @@ export function ObjectBrowser({
   breadcrumbs,
   searchQuery,
   notice,
+  objectListingCacheInfo,
   presignedFallback,
   uploadState,
   uploadPercent,
@@ -119,6 +121,8 @@ export function ObjectBrowser({
             Load more
           </Button>
         ) : null}
+
+        <CacheAge cacheInfo={objectListingCacheInfo} />
       </div>
     </section>
   )
@@ -347,6 +351,56 @@ function ObjectList({
       </div>
     </div>
   )
+}
+
+function CacheAge({
+  cacheInfo,
+}: {
+  cacheInfo: ObjectListingCacheInfo | null
+}) {
+  const [now, setNow] = React.useState(() => Date.now())
+
+  React.useEffect(() => {
+    if (!cacheInfo) {
+      return
+    }
+
+    const intervalId = window.setInterval(() => {
+      setNow(Date.now())
+    }, 60 * 1000)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [cacheInfo])
+
+  if (!cacheInfo) {
+    return null
+  }
+
+  return (
+    <div className="border-t pt-2 text-center text-xs text-muted-foreground">
+      Cache age: {formatElapsedTime(now - cacheInfo.cachedAt)}
+    </div>
+  )
+}
+
+function formatElapsedTime(valueMs: number) {
+  const seconds = Math.max(0, Math.floor(valueMs / 1000))
+
+  if (seconds < 60) {
+    return "just now"
+  }
+
+  const minutes = Math.floor(seconds / 60)
+
+  if (minutes < 60) {
+    return minutes === 1 ? "1 minute" : `${minutes} minutes`
+  }
+
+  const hours = Math.floor(minutes / 60)
+
+  return hours === 1 ? "1 hour" : `${hours} hours`
 }
 
 function ObjectRow({

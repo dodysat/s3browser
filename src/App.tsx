@@ -33,6 +33,7 @@ import {
   uploadObject,
   type BrowserEntry,
   type BucketSummary,
+  type ObjectListingCacheInfo,
 } from "@/lib/s3"
 
 type LoadEntriesOptions = {
@@ -42,6 +43,7 @@ type LoadEntriesOptions = {
   continuationToken?: string | null
   append: boolean
   routeMode?: "push" | "replace" | "none"
+  cacheMode?: "allow" | "reload"
 }
 
 export function App() {
@@ -69,6 +71,8 @@ export function App() {
   const [buckets, setBuckets] = React.useState<BucketSummary[]>([])
   const [currentPrefix, setCurrentPrefix] = React.useState("")
   const [entries, setEntries] = React.useState<BrowserEntry[]>([])
+  const [objectListingCacheInfo, setObjectListingCacheInfo] =
+    React.useState<ObjectListingCacheInfo | null>(null)
   const [nextContinuationToken, setNextContinuationToken] = React.useState<
     string | null
   >(null)
@@ -233,6 +237,7 @@ export function App() {
     continuationToken,
     append,
     routeMode = "none",
+    cacheMode = "allow",
   }: LoadEntriesOptions) {
     setIsEntryListLoading(true)
     setPresignedFallback(null)
@@ -252,6 +257,7 @@ export function App() {
         bucket,
         prefix: normalizedPrefix,
         continuationToken,
+        cacheMode,
       })
 
       setEntries((currentEntries) =>
@@ -259,11 +265,13 @@ export function App() {
       )
       setCurrentPrefix(normalizedPrefix)
       setNextContinuationToken(listing.nextContinuationToken)
+      setObjectListingCacheInfo(listing.cacheInfo)
       setNotice(null)
     } catch (error) {
       if (!append) {
         setEntries([])
         setNextContinuationToken(null)
+        setObjectListingCacheInfo(null)
       }
 
       setNotice({
@@ -317,6 +325,7 @@ export function App() {
         setEntries([])
         setCurrentPrefix("")
         setNextContinuationToken(null)
+        setObjectListingCacheInfo(null)
         setNotice(null)
         return
       }
@@ -329,6 +338,7 @@ export function App() {
         setEntries([])
         setCurrentPrefix(route.prefix)
         setNextContinuationToken(null)
+        setObjectListingCacheInfo(null)
         setNotice({ type: "error", text: "Save a profile first." })
         return
       }
@@ -404,6 +414,7 @@ export function App() {
     setEntries([])
     setCurrentPrefix("")
     setNextContinuationToken(null)
+    setObjectListingCacheInfo(null)
     setNotice(null)
   }
 
@@ -416,6 +427,7 @@ export function App() {
     setEntries([])
     setCurrentPrefix("")
     setNextContinuationToken(null)
+    setObjectListingCacheInfo(null)
     setNotice(null)
     setIsProfilePanelOpen(false)
   }
@@ -450,6 +462,7 @@ export function App() {
     setEntries([])
     setCurrentPrefix("")
     setNextContinuationToken(null)
+    setObjectListingCacheInfo(null)
     setNotice(null)
   }
 
@@ -563,6 +576,7 @@ export function App() {
         bucket: bucketName,
         prefix: currentPrefix,
         append: false,
+        cacheMode: "reload",
       })
     } catch (error) {
       setNotice({
@@ -584,6 +598,7 @@ export function App() {
       bucket: bucketName,
       prefix: currentPrefix,
       append: false,
+      cacheMode: "reload",
     })
   }
 
@@ -659,6 +674,7 @@ export function App() {
           breadcrumbs={breadcrumbs}
           searchQuery={searchQuery}
           notice={notice}
+          objectListingCacheInfo={objectListingCacheInfo}
           presignedFallback={presignedFallback}
           uploadState={uploadState}
           uploadPercent={uploadPercent}
