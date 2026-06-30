@@ -1288,6 +1288,7 @@ export function App() {
           }}
           onBreadcrumbOpen={openBreadcrumbPrefix}
           onLoadMore={loadMoreEntries}
+          onClearUploads={() => setUploadTasks([])}
         />
       </main>
 

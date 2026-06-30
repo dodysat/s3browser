@@ -17,6 +17,7 @@ import {
   Search,
   Trash2,
   UploadCloud,
+  X,
 } from "lucide-react"
 
 import { EmptyState } from "@/components/empty-state"
@@ -56,6 +57,7 @@ type ObjectBrowserProps = {
   onEntryDelete: (entry: BrowserEntry) => void
   onBreadcrumbOpen: (prefix: string) => void
   onLoadMore: () => void
+  onClearUploads: () => void
 }
 
 export function ObjectBrowser({
@@ -86,6 +88,7 @@ export function ObjectBrowser({
   onEntryDelete,
   onBreadcrumbOpen,
   onLoadMore,
+  onClearUploads,
 }: ObjectBrowserProps) {
   return (
     <section className="grid min-w-0 gap-3">
@@ -118,6 +121,7 @@ export function ObjectBrowser({
           tasks={uploadTasks}
           activeUploadCount={activeUploadCount}
           wakeLockState={wakeLockState}
+          onClear={onClearUploads}
         />
 
         <ObjectList
@@ -309,15 +313,33 @@ function UploadQueue({
   tasks,
   activeUploadCount,
   wakeLockState,
+  onClear,
 }: {
   tasks: UploadTask[]
   activeUploadCount: number
   wakeLockState: WakeLockState
+  onClear: () => void
 }) {
   const [now, setNow] = React.useState(() => Date.now())
+  const scrollAreaRef = React.useRef<HTMLDivElement | null>(null)
+  const shouldFollowUploadRef = React.useRef(true)
+  const isAutoScrollingRef = React.useRef(false)
+  const previousHasActiveTasksRef = React.useRef(false)
+  const taskRowsRef = React.useRef(new Map<string, HTMLDivElement>())
   const hasActiveTasks = tasks.some(
     (task) => task.status === "queued" || task.status === "uploading"
   )
+  const latestUploadingTaskId = [...tasks]
+    .reverse()
+    .find((task) => task.status === "uploading")?.id
+
+  React.useEffect(() => {
+    if (hasActiveTasks && !previousHasActiveTasksRef.current) {
+      shouldFollowUploadRef.current = true
+    }
+
+    previousHasActiveTasksRef.current = hasActiveTasks
+  }, [hasActiveTasks])
 
   React.useEffect(() => {
     if (!hasActiveTasks) {
@@ -333,6 +355,41 @@ function UploadQueue({
     }
   }, [hasActiveTasks])
 
+  React.useEffect(() => {
+    if (!latestUploadingTaskId || !shouldFollowUploadRef.current) {
+      return
+    }
+
+    const row = taskRowsRef.current.get(latestUploadingTaskId)
+
+    if (!row) {
+      return
+    }
+
+    const scrollArea = scrollAreaRef.current
+
+    if (!scrollArea) {
+      return
+    }
+
+    const rowTop = row.offsetTop
+    const rowBottom = rowTop + row.offsetHeight
+    const visibleTop = scrollArea.scrollTop
+    const visibleBottom = visibleTop + scrollArea.clientHeight
+
+    isAutoScrollingRef.current = true
+
+    if (rowBottom > visibleBottom) {
+      scrollArea.scrollTop = rowBottom - scrollArea.clientHeight
+    } else if (rowTop < visibleTop) {
+      scrollArea.scrollTop = rowTop
+    }
+
+    window.setTimeout(() => {
+      isAutoScrollingRef.current = false
+    }, 120)
+  }, [latestUploadingTaskId, now])
+
   if (tasks.length === 0) {
     return null
   }
@@ -341,11 +398,37 @@ function UploadQueue({
     (task) => task.status === "success" || task.status === "error"
   ).length
   const failedCount = tasks.filter((task) => task.status === "error").length
+  const canClear = !hasActiveTasks
+
+  function handleTaskRowsScroll() {
+    const scrollArea = scrollAreaRef.current
+
+    if (!scrollArea || isAutoScrollingRef.current) {
+      return
+    }
+
+    const distanceFromBottom =
+      scrollArea.scrollHeight - scrollArea.scrollTop - scrollArea.clientHeight
+
+    shouldFollowUploadRef.current = distanceFromBottom < 24
+  }
 
   return (
-    <div className="grid gap-3 rounded-[8px] border p-3">
-      <div className="flex items-center justify-between gap-3 text-sm">
-        <div className="min-w-0 font-medium">
+    <div className="grid max-h-[50svh] min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-[8px] border p-3 sm:max-h-[50vh]">
+      <div className="flex items-center gap-2 text-sm">
+        {canClear ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-8"
+            aria-label="Close upload list"
+            onClick={onClear}
+          >
+            <X className="size-4" />
+          </Button>
+        ) : null}
+        <div className="min-w-0 flex-1 font-medium">
           Uploads {finishedCount}/{tasks.length}
         </div>
         <div
@@ -366,16 +449,34 @@ function UploadQueue({
             ? `${failedCount} failed`
             : "All uploads complete"}
       </div>
-      <div className="grid gap-2">
+      <div
+        ref={scrollAreaRef}
+        className="grid min-h-0 gap-2 overflow-y-auto overscroll-contain pr-1"
+        onScroll={handleTaskRowsScroll}
+      >
         {tasks.map((task) => (
-          <UploadTaskRow key={task.id} task={task} now={now} />
+          <UploadTaskRow
+            key={task.id}
+            ref={(node) => {
+              if (node) {
+                taskRowsRef.current.set(task.id, node)
+              } else {
+                taskRowsRef.current.delete(task.id)
+              }
+            }}
+            task={task}
+            now={now}
+          />
         ))}
       </div>
     </div>
   )
 }
 
-function UploadTaskRow({ task, now }: { task: UploadTask; now: number }) {
+const UploadTaskRow = React.forwardRef<
+  HTMLDivElement,
+  { task: UploadTask; now: number }
+>(function UploadTaskRow({ task, now }, ref) {
   const percent = clampPercent(
     task.total ? Math.round((task.loaded / task.total) * 100) : null
   )
@@ -391,7 +492,7 @@ function UploadTaskRow({ task, now }: { task: UploadTask; now: number }) {
       : null
 
   return (
-    <div className="grid gap-2 rounded-[8px] bg-muted/40 p-2">
+    <div ref={ref} className="grid gap-2 rounded-[8px] bg-muted/40 p-2">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
         <div className="min-w-0 truncate text-sm font-medium">
           {task.fileName}
@@ -425,7 +526,7 @@ function UploadTaskRow({ task, now }: { task: UploadTask; now: number }) {
       </div>
     </div>
   )
-}
+})
 
 function UploadTaskStatusBadge({ task }: { task: UploadTask }) {
   if (task.status === "success") {
