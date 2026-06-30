@@ -431,12 +431,14 @@ export async function uploadObject({
   key,
   file,
   onProgress,
+  signal,
 }: {
   profile: S3Profile
   bucket: string
   key: string
   file: File
   onProgress?: (progress: UploadProgress) => void
+  signal?: AbortSignal
 }) {
   const client = createClient(profile)
 
@@ -460,6 +462,7 @@ export async function uploadObject({
     file,
     contentType,
     onProgress,
+    signal,
   })
 }
 
@@ -468,14 +471,43 @@ function uploadWithProgress({
   file,
   contentType,
   onProgress,
+  signal,
 }: {
   url: string
   file: File
   contentType?: string
   onProgress?: (progress: UploadProgress) => void
+  signal?: AbortSignal
 }) {
   return new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest()
+    let settled = false
+
+    const cleanup = () => {
+      signal?.removeEventListener("abort", handleAbort)
+    }
+
+    const finish = (callback: () => void) => {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      cleanup()
+      callback()
+    }
+
+    const handleAbort = () => {
+      xhr.abort()
+      finish(() => reject(new Error("Upload was aborted.")))
+    }
+
+    if (signal?.aborted) {
+      reject(new Error("Upload was aborted."))
+      return
+    }
+
+    signal?.addEventListener("abort", handleAbort, { once: true })
 
     xhr.open("PUT", url)
 
@@ -496,27 +528,31 @@ function uploadWithProgress({
           loaded: file.size,
           total: file.size,
         })
-        resolve()
+        finish(resolve)
         return
       }
 
-      reject(
-        new Error(
-          xhr.responseText.trim() || `Upload failed with HTTP ${xhr.status}.`
+      finish(() =>
+        reject(
+          new Error(
+            xhr.responseText.trim() || `Upload failed with HTTP ${xhr.status}.`
+          )
         )
       )
     }
 
     xhr.onerror = () => {
-      reject(
-        new Error(
-          "Upload failed. Check that bucket CORS allows PUT from this origin."
+      finish(() =>
+        reject(
+          new Error(
+            "Upload failed. Check that bucket CORS allows PUT from this origin."
+          )
         )
       )
     }
 
     xhr.onabort = () => {
-      reject(new Error("Upload was aborted."))
+      finish(() => reject(new Error("Upload was aborted.")))
     }
 
     onProgress?.({

@@ -3,14 +3,24 @@ export type Notice = {
   text: string
 }
 
-export type UploadState = {
+export type UploadTaskStatus = "queued" | "uploading" | "success" | "error"
+
+export type UploadTask = {
+  id: string
   fileName: string
+  key: string
   loaded: number
   total: number | null
   startedAt: number
   updatedAt: number
-  index: number
-  totalFiles: number
+  completedAt: number | null
+  status: UploadTaskStatus
+  error: string | null
+}
+
+export type WakeLockState = {
+  status: "idle" | "active" | "unavailable" | "released"
+  text: string
 }
 
 export type Breadcrumb = {

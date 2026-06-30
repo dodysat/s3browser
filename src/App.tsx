@@ -11,7 +11,7 @@ import {
 } from "@/components/app-dialogs"
 import { ConnectionPanel } from "@/components/connection-panel"
 import { ObjectBrowser } from "@/components/object-browser"
-import type { Notice, UploadState } from "@/lib/app-types"
+import type { Notice, UploadTask, WakeLockState } from "@/lib/app-types"
 import {
   createRouteKey,
   normalizeRoutePrefix,
@@ -56,9 +56,29 @@ type LoadEntriesOptions = {
   cacheMode?: "allow" | "reload"
 }
 
+type UploadItem = {
+  id: string
+  file: File
+  key: string
+}
+
+type WakeLockSentinelLike = EventTarget & {
+  released: boolean
+  release: () => Promise<void>
+}
+
+type NavigatorWithWakeLock = Navigator & {
+  wakeLock?: {
+    request: (type: "screen") => Promise<WakeLockSentinelLike>
+  }
+}
+
+const UPLOAD_CONCURRENCY = 3
+
 export function App() {
   const uploadInputRef = React.useRef<HTMLInputElement | null>(null)
   const lastHandledRouteRef = React.useRef<string | null>(null)
+  const wakeLockRef = React.useRef<WakeLockSentinelLike | null>(null)
   const confirmDialogResolverRef = React.useRef<
     ((confirmed: boolean) => void) | null
   >(null)
@@ -104,7 +124,11 @@ export function App() {
   const [isFolderCreating, setIsFolderCreating] = React.useState(false)
   const [openingKey, setOpeningKey] = React.useState<string | null>(null)
   const [deletingKey, setDeletingKey] = React.useState<string | null>(null)
-  const [uploadState, setUploadState] = React.useState<UploadState | null>(null)
+  const [uploadTasks, setUploadTasks] = React.useState<UploadTask[]>([])
+  const [wakeLockState, setWakeLockState] = React.useState<WakeLockState>({
+    status: "idle",
+    text: "Keep awake inactive",
+  })
   const [presignedFallback, setPresignedFallback] = React.useState<{
     name: string
     url: string
@@ -141,10 +165,13 @@ export function App() {
     [currentPrefix]
   )
 
-  const uploadPercent =
-    uploadState && uploadState.total
-      ? Math.round((uploadState.loaded / uploadState.total) * 100)
-      : null
+  const hasActiveUploads = uploadTasks.some(
+    (task) => task.status === "queued" || task.status === "uploading"
+  )
+
+  const activeUploadCount = uploadTasks.filter(
+    (task) => task.status === "queued" || task.status === "uploading"
+  ).length
 
   function requestConfirm(dialog: ConfirmDialogState) {
     return new Promise<boolean>((resolve) => {
@@ -239,6 +266,116 @@ export function App() {
 
     settleFolderNameDialog(folderName)
   }
+
+  function createUploadTaskId(index: number) {
+    if ("randomUUID" in crypto) {
+      return crypto.randomUUID()
+    }
+
+    return `upload-${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`
+  }
+
+  function updateUploadTask(taskId: string, patch: Partial<UploadTask>) {
+    setUploadTasks((currentTasks) =>
+      currentTasks.map((task) =>
+        task.id === taskId ? { ...task, ...patch } : task
+      )
+    )
+  }
+
+  const requestWakeLock = React.useCallback(async function requestWakeLock() {
+    const navigatorWithWakeLock = navigator as NavigatorWithWakeLock
+
+    if (wakeLockRef.current && !wakeLockRef.current.released) {
+      setWakeLockState({
+        status: "active",
+        text: "Keep awake active",
+      })
+      return
+    }
+
+    if (!navigatorWithWakeLock.wakeLock) {
+      setWakeLockState({
+        status: "unavailable",
+        text: "Keep awake unavailable",
+      })
+      return
+    }
+
+    if (document.visibilityState !== "visible") {
+      setWakeLockState({
+        status: "released",
+        text: "Keep awake released",
+      })
+      return
+    }
+
+    try {
+      const wakeLock = await navigatorWithWakeLock.wakeLock.request("screen")
+
+      wakeLockRef.current = wakeLock
+      wakeLock.addEventListener("release", () => {
+        if (wakeLockRef.current === wakeLock) {
+          wakeLockRef.current = null
+          setWakeLockState({
+            status: "released",
+            text: "Keep awake released",
+          })
+        }
+      })
+      setWakeLockState({
+        status: "active",
+        text: "Keep awake active",
+      })
+    } catch {
+      wakeLockRef.current = null
+      setWakeLockState({
+        status: "unavailable",
+        text: "Keep awake unavailable",
+      })
+    }
+  }, [])
+
+  const releaseWakeLock = React.useCallback(async function releaseWakeLock() {
+    const wakeLock = wakeLockRef.current
+
+    wakeLockRef.current = null
+
+    if (wakeLock && !wakeLock.released) {
+      try {
+        await wakeLock.release()
+      } catch {
+        // Wake locks can be revoked by the browser or OS; no recovery needed.
+      }
+    }
+
+    setWakeLockState((currentState) =>
+      currentState.status === "unavailable"
+        ? currentState
+        : {
+            status: "released",
+            text: "Keep awake released",
+          }
+    )
+  }, [])
+
+  React.useEffect(() => {
+    if (!hasActiveUploads) {
+      return
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void requestWakeLock()
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }
+  }, [hasActiveUploads, requestWakeLock])
 
   function commitProfiles(nextProfiles: S3Profile[]) {
     setProfilesState(nextProfiles)
@@ -890,61 +1027,146 @@ export function App() {
       return
     }
 
-    try {
-      for (const [index, file] of files.entries()) {
-        const key = normalizeUploadKey(currentPrefix, file.name)
-        const alreadyExists = entries.some(
-          (entry) => entry.type === "object" && entry.key === key
-        )
+    const uploadProfile = activeProfile
+    const uploadBucket = bucketName
+    const uploadPrefix = currentPrefix
 
-        if (alreadyExists) {
-          const confirmed = await requestConfirm({
-            title: "Overwrite File",
-            description: `Replace "${file.name}" in the current prefix?`,
-            confirmLabel: "Overwrite",
-          })
+    if (hasActiveUploads) {
+      setNotice({ type: "error", text: "Uploads are already running." })
+      return
+    }
 
-          if (!confirmed) {
-            continue
-          }
-        }
+    const uploadItems: UploadItem[] = []
 
-        const uploadStartedAt = Date.now()
+    for (const [index, file] of files.entries()) {
+      const key = normalizeUploadKey(uploadPrefix, file.name)
+      const alreadyExists = entries.some(
+        (entry) => entry.type === "object" && entry.key === key
+      )
 
-        setUploadState({
-          fileName: file.name,
-          loaded: 0,
-          total: file.size,
-          startedAt: uploadStartedAt,
-          updatedAt: uploadStartedAt,
-          index: index + 1,
-          totalFiles: files.length,
+      if (alreadyExists) {
+        const confirmed = await requestConfirm({
+          title: "Overwrite File",
+          description: `Replace "${file.name}" in the current prefix?`,
+          confirmLabel: "Overwrite",
         })
 
+        if (!confirmed) {
+          continue
+        }
+      }
+
+      uploadItems.push({
+        id: createUploadTaskId(index),
+        file,
+        key,
+      })
+    }
+
+    if (uploadItems.length === 0) {
+      return
+    }
+
+    const queuedAt = Date.now()
+
+    setUploadTasks(
+      uploadItems.map((item) => ({
+        id: item.id,
+        fileName: item.file.name,
+        key: item.key,
+        loaded: 0,
+        total: item.file.size,
+        startedAt: queuedAt,
+        updatedAt: queuedAt,
+        completedAt: null,
+        status: "queued",
+        error: null,
+      }))
+    )
+    setNotice(null)
+    void requestWakeLock()
+
+    let nextUploadIndex = 0
+    let failedUploadCount = 0
+
+    async function runUploadItem(item: UploadItem) {
+      const uploadStartedAt = Date.now()
+
+      updateUploadTask(item.id, {
+        status: "uploading",
+        startedAt: uploadStartedAt,
+        updatedAt: uploadStartedAt,
+      })
+
+      try {
         await uploadObject({
-          profile: activeProfile,
-          bucket: bucketName,
-          key,
-          file,
+          profile: uploadProfile,
+          bucket: uploadBucket,
+          key: item.key,
+          file: item.file,
           onProgress: (progress) => {
-            setUploadState({
-              fileName: file.name,
+            updateUploadTask(item.id, {
               loaded: progress.loaded,
-              total: progress.total,
-              startedAt: uploadStartedAt,
+              total: progress.total ?? item.file.size,
               updatedAt: Date.now(),
-              index: index + 1,
-              totalFiles: files.length,
             })
           },
         })
+
+        const completedAt = Date.now()
+
+        updateUploadTask(item.id, {
+          loaded: item.file.size,
+          total: item.file.size,
+          updatedAt: completedAt,
+          completedAt,
+          status: "success",
+          error: null,
+        })
+      } catch (error) {
+        failedUploadCount += 1
+
+        const completedAt = Date.now()
+
+        updateUploadTask(item.id, {
+          updatedAt: completedAt,
+          completedAt,
+          status: "error",
+          error: formatS3Error(error),
+        })
+      }
+    }
+
+    try {
+      const workers = Array.from(
+        { length: Math.min(UPLOAD_CONCURRENCY, uploadItems.length) },
+        async () => {
+          while (nextUploadIndex < uploadItems.length) {
+            const uploadItem = uploadItems[nextUploadIndex]
+            nextUploadIndex += 1
+
+            if (uploadItem) {
+              await runUploadItem(uploadItem)
+            }
+          }
+        }
+      )
+
+      await Promise.all(workers)
+
+      if (failedUploadCount > 0) {
+        setNotice({
+          type: "error",
+          text: `${failedUploadCount} of ${uploadItems.length} uploads failed.`,
+        })
+      } else {
+        setNotice(null)
       }
 
-      setNotice(null)
       await loadEntries({
-        profile: activeProfile,
-        bucket: bucketName,
-        prefix: currentPrefix,
+        profile: uploadProfile,
+        bucket: uploadBucket,
+        prefix: uploadPrefix,
         append: false,
         cacheMode: "reload",
       })
@@ -952,12 +1174,8 @@ export function App() {
       const message = formatS3Error(error)
 
       setNotice({ type: "error", text: message })
-      await showMessageDialog({
-        title: "Upload Failed",
-        description: message,
-      })
     } finally {
-      setUploadState(null)
+      await releaseWakeLock()
     }
   }
 
@@ -1044,8 +1262,10 @@ export function App() {
           notice={notice}
           objectListingCacheInfo={objectListingCacheInfo}
           presignedFallback={presignedFallback}
-          uploadState={uploadState}
-          uploadPercent={uploadPercent}
+          uploadTasks={uploadTasks}
+          hasActiveUploads={hasActiveUploads}
+          activeUploadCount={activeUploadCount}
+          wakeLockState={wakeLockState}
           openingKey={openingKey}
           deletingKey={deletingKey}
           isFolderCreating={isFolderCreating}

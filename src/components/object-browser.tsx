@@ -1,7 +1,10 @@
 import * as React from "react"
 import {
   ArrowLeft,
+  CircleAlert,
+  CheckCircle2,
   ChevronRight,
+  Clock3,
   Database,
   ExternalLink,
   File,
@@ -20,7 +23,7 @@ import { EmptyState } from "@/components/empty-state"
 import { TextInput } from "@/components/form-controls"
 import { NoticeBanner } from "@/components/notice-banner"
 import { Button } from "@/components/ui/button"
-import type { Breadcrumb, Notice, UploadState } from "@/lib/app-types"
+import type { Breadcrumb, Notice, UploadTask, WakeLockState } from "@/lib/app-types"
 import { formatBytes, formatDate } from "@/lib/file-browser"
 import type { BrowserEntry, ObjectListingCacheInfo } from "@/lib/s3"
 import { cn } from "@/lib/utils"
@@ -35,8 +38,10 @@ type ObjectBrowserProps = {
   notice: Notice | null
   objectListingCacheInfo: ObjectListingCacheInfo | null
   presignedFallback: { name: string; url: string } | null
-  uploadState: UploadState | null
-  uploadPercent: number | null
+  uploadTasks: UploadTask[]
+  hasActiveUploads: boolean
+  activeUploadCount: number
+  wakeLockState: WakeLockState
   openingKey: string | null
   deletingKey: string | null
   isFolderCreating: boolean
@@ -63,8 +68,10 @@ export function ObjectBrowser({
   notice,
   objectListingCacheInfo,
   presignedFallback,
-  uploadState,
-  uploadPercent,
+  uploadTasks,
+  hasActiveUploads,
+  activeUploadCount,
+  wakeLockState,
   openingKey,
   deletingKey,
   isFolderCreating,
@@ -89,7 +96,7 @@ export function ObjectBrowser({
           searchQuery={searchQuery}
           isEntryListLoading={isEntryListLoading}
           isFolderCreating={isFolderCreating}
-          uploadState={uploadState}
+          hasActiveUploads={hasActiveUploads}
           uploadInputRef={uploadInputRef}
           onSearchChange={onSearchChange}
           onRefresh={onRefresh}
@@ -107,7 +114,11 @@ export function ObjectBrowser({
 
         <NoticeBanner notice={notice} />
         <PresignedFallbackLink fallback={presignedFallback} />
-        <UploadProgress uploadState={uploadState} uploadPercent={uploadPercent} />
+        <UploadQueue
+          tasks={uploadTasks}
+          activeUploadCount={activeUploadCount}
+          wakeLockState={wakeLockState}
+        />
 
         <ObjectList
           bucketName={bucketName}
@@ -148,7 +159,7 @@ function ObjectToolbar({
   searchQuery,
   isEntryListLoading,
   isFolderCreating,
-  uploadState,
+  hasActiveUploads,
   uploadInputRef,
   onSearchChange,
   onRefresh,
@@ -160,7 +171,7 @@ function ObjectToolbar({
   searchQuery: string
   isEntryListLoading: boolean
   isFolderCreating: boolean
-  uploadState: UploadState | null
+  hasActiveUploads: boolean
   uploadInputRef: React.RefObject<HTMLInputElement | null>
   onSearchChange: (query: string) => void
   onRefresh: () => void
@@ -215,10 +226,10 @@ function ObjectToolbar({
           size="icon"
           className="size-10"
           aria-label="Upload files"
-          disabled={!hasActiveProfile || !bucketName || !!uploadState}
+          disabled={!hasActiveProfile || !bucketName || hasActiveUploads}
           onClick={() => uploadInputRef.current?.click()}
         >
-          {uploadState ? (
+          {hasActiveUploads ? (
             <LoaderCircle className="animate-spin" />
           ) : (
             <UploadCloud />
@@ -294,18 +305,22 @@ function PresignedFallbackLink({
   )
 }
 
-function UploadProgress({
-  uploadState,
-  uploadPercent,
+function UploadQueue({
+  tasks,
+  activeUploadCount,
+  wakeLockState,
 }: {
-  uploadState: UploadState | null
-  uploadPercent: number | null
+  tasks: UploadTask[]
+  activeUploadCount: number
+  wakeLockState: WakeLockState
 }) {
   const [now, setNow] = React.useState(() => Date.now())
-  const uploadStartedAt = uploadState?.startedAt ?? null
+  const hasActiveTasks = tasks.some(
+    (task) => task.status === "queued" || task.status === "uploading"
+  )
 
   React.useEffect(() => {
-    if (!uploadStartedAt) {
+    if (!hasActiveTasks) {
       return
     }
 
@@ -316,55 +331,135 @@ function UploadProgress({
     return () => {
       window.clearInterval(intervalId)
     }
-  }, [uploadStartedAt])
+  }, [hasActiveTasks])
 
-  if (!uploadState) {
+  if (tasks.length === 0) {
     return null
   }
 
-  const percent = clampPercent(
-    uploadPercent ??
-      (uploadState.total
-        ? Math.round((uploadState.loaded / uploadState.total) * 100)
-        : null)
+  const finishedCount = tasks.filter(
+    (task) => task.status === "success" || task.status === "error"
+  ).length
+  const failedCount = tasks.filter((task) => task.status === "error").length
+
+  return (
+    <div className="grid gap-3 rounded-[8px] border p-3">
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <div className="min-w-0 font-medium">
+          Uploads {finishedCount}/{tasks.length}
+        </div>
+        <div
+          className={cn(
+            "shrink-0 rounded-full px-2 py-1 text-xs",
+            wakeLockState.status === "active"
+              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+              : "bg-muted text-muted-foreground"
+          )}
+        >
+          {wakeLockState.text}
+        </div>
+      </div>
+      <div className="text-xs text-muted-foreground">
+        {activeUploadCount > 0
+          ? `${activeUploadCount} active or queued`
+          : failedCount > 0
+            ? `${failedCount} failed`
+            : "All uploads complete"}
+      </div>
+      <div className="grid gap-2">
+        {tasks.map((task) => (
+          <UploadTaskRow key={task.id} task={task} now={now} />
+        ))}
+      </div>
+    </div>
   )
-  const elapsedSeconds = Math.max((now - uploadState.startedAt) / 1000, 0)
-  const uploadSpeed =
-    elapsedSeconds > 0 ? uploadState.loaded / elapsedSeconds : 0
-  const remainingBytes = uploadState.total
-    ? Math.max(uploadState.total - uploadState.loaded, 0)
-    : null
+}
+
+function UploadTaskRow({ task, now }: { task: UploadTask; now: number }) {
+  const percent = clampPercent(
+    task.total ? Math.round((task.loaded / task.total) * 100) : null
+  )
+  const elapsedSeconds =
+    task.status === "uploading"
+      ? Math.max((now - task.startedAt) / 1000, 0)
+      : Math.max((task.updatedAt - task.startedAt) / 1000, 0)
+  const uploadSpeed = elapsedSeconds > 0 ? task.loaded / elapsedSeconds : 0
+  const remainingBytes = task.total ? Math.max(task.total - task.loaded, 0) : null
   const remainingSeconds =
-    remainingBytes !== null && uploadSpeed > 0
+    task.status === "uploading" && remainingBytes !== null && uploadSpeed > 0
       ? Math.ceil(remainingBytes / uploadSpeed)
       : null
 
   return (
-    <div className="grid gap-2 rounded-[8px] border p-3">
-      <div className="flex items-center justify-between gap-3 text-sm">
-        <div className="min-w-0 truncate">Uploading {uploadState.fileName}</div>
-        <div className="shrink-0 text-xs text-muted-foreground">
-          {uploadState.index}/{uploadState.totalFiles}
+    <div className="grid gap-2 rounded-[8px] bg-muted/40 p-2">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+        <div className="min-w-0 truncate text-sm font-medium">
+          {task.fileName}
         </div>
+        <UploadTaskStatusBadge task={task} />
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
         <span>{percent !== null ? `${percent}%` : "Preparing"}</span>
-        <span>{formatBytes(uploadState.loaded)} uploaded</span>
-        {uploadState.total ? (
-          <span>of {formatBytes(uploadState.total)}</span>
+        <span>{formatBytes(task.loaded)} uploaded</span>
+        {task.total ? <span>of {formatBytes(task.total)}</span> : null}
+        {task.status === "uploading" ? (
+          <>
+            <span>{formatUploadSpeed(uploadSpeed)}</span>
+            <span>{formatUploadEta(remainingSeconds)}</span>
+          </>
         ) : null}
-        <span>{formatUploadSpeed(uploadSpeed)}</span>
-        <span>{formatUploadEta(remainingSeconds)}</span>
+        {task.status === "error" && task.error ? (
+          <span className="text-destructive">{task.error}</span>
+        ) : null}
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-muted">
+      <div className="h-2 overflow-hidden rounded-full bg-background">
         <div
-          className="h-full bg-emerald-500 transition-all"
+          className={cn(
+            "h-full transition-all",
+            task.status === "error" ? "bg-destructive" : "bg-emerald-500"
+          )}
           style={{
-            width: `${percent ?? 15}%`,
+            width: `${percent ?? (task.status === "queued" ? 0 : 15)}%`,
           }}
         />
       </div>
     </div>
+  )
+}
+
+function UploadTaskStatusBadge({ task }: { task: UploadTask }) {
+  if (task.status === "success") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-xs text-emerald-600 dark:text-emerald-300">
+        <CheckCircle2 className="size-3" />
+        Done
+      </span>
+    )
+  }
+
+  if (task.status === "error") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-1 text-xs text-destructive">
+        <CircleAlert className="size-3" />
+        Error
+      </span>
+    )
+  }
+
+  if (task.status === "queued") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-background px-2 py-1 text-xs text-muted-foreground">
+        <Clock3 className="size-3" />
+        Queued
+      </span>
+    )
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-1 text-xs text-blue-600 dark:text-blue-300">
+      <LoaderCircle className="size-3 animate-spin" />
+      Uploading
+    </span>
   )
 }
 
